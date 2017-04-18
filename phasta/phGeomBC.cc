@@ -4,7 +4,7 @@
 #include <sstream>
 #include <cassert>
 #include <cstdlib>
-
+#include <iostream>
 namespace ph {
 
 static std::string buildGeomBCFileName(std::string timestep_or_dat)
@@ -30,6 +30,20 @@ void getInteriorConnectivity(Output& o, int block, apf::DynamicArray<int>& c)
       c[i++] = o.arrays.ien[block][elem][vert] + 1; /* FORTRAN indexing */
   assert(i == c.getSize());
 }
+
+
+void getInteriorOrder(Output& o, int block, apf::DynamicArray<int>& c)
+{
+  int nelem = o.blocks.interior.nElements[block];
+  int nvert = o.blocks.interior.keys[block].nElementVertices;
+  c.setSize(nelem * nvert);
+  size_t i = 0;
+  for (int vert = 0; vert < nvert; ++vert)
+    for (int elem = 0; elem < nelem; ++elem)
+      c[i++] = o.arrays.ienp[block][elem][vert] + 1; /* FORTRAN indexing */
+  assert(i == c.getSize());
+}
+
 
 void getBoundaryConnectivity(Output& o, int block, apf::DynamicArray<int>& c)
 {
@@ -183,6 +197,13 @@ void writeBlocks(FILE* f, Output& o)
     fillBlockKeyParams(params, k);
     getInteriorConnectivity(o, i, c);
     ph_write_ints(f, phrase.c_str(), &c[0], c.getSize(), 7, params);
+    
+    //phrase = getBlockKeyPhrase(k, "pOrder interior ");
+    phrase = "porder interior "; 
+    getInteriorOrder(o, i, c);
+    ph_write_ints(f, phrase.c_str(), &c[0], c.getSize(), 7, params);
+    std::cout<<" orderPhrase "<<phrase.c_str()<<"\n"; 
+    
     if (o.arrays.mattype) {
       phrase = getBlockKeyPhrase(k, "material type interior ");
       getInteriorMaterialType(o, i, c);
@@ -317,7 +338,10 @@ void writeGeomBC(Output& o, std::string path, int timestep)
   params[0] = m->count(0);
   writeInts(f, " mode number map from partition to global",
       o.arrays.globalNodeNumbers, m->count(0));
+      
+  std::cout<<"before writeBlocks"<<"\n";   
   writeBlocks(f, o);
+  std::cout<<"after writeBlocks"<<"\n";  
   writeInts(f, "bc mapping array", o.arrays.nbc, m->count(0));
   writeInts(f, "bc codes array", o.arrays.ibc, o.nEssentialBCNodes);
   apf::DynamicArray<double> bc;

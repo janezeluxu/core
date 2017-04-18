@@ -8,7 +8,7 @@
 #include <fstream>
 #include <sstream>
 #include <cassert>
-
+#include <iostream>
 namespace ph {
 
 static void getCounts(Output& o)
@@ -67,17 +67,68 @@ static void getVertexLinks(Output& o, apf::Numbering* n, BCs& bcs)
   encodeILWORK(n, links, o.nlwork, o.arrays.ilwork);
 }
 
+static void createEdgeDOF(Output& o, apf::MeshTag* tags, int p)
+{
+	//loop through all edge, tag edge DOF
+	apf::Mesh* m = o.mesh;
+	apf::MeshEntity* e;
+	apf::MeshIterator* it = m->begin(1);
+	int* value = new int[p-1];
+	while ((e = m->iterate(it))) {
+	   for (int i = 0; i<p;i++)
+			{
+			value[i] = i;
+		}
+		m->setIntTag(e,tags,value);
+	}
+}
+/*
+static void createFaceDOF(Output& o, apf::MeshTag* tags, int p)
+{
+	//loop through all edge, tag edge DOF
+	apf::Mesh* m = o.mesh;
+	apf::MeshEntity* e;
+	apf::MeshIterator* it = m->begin(1);
+	int* value = new int[p-1];
+	while ((e = m->iterate(it))) {
+	   for (int i = 0; i<p;i++)
+			{
+			value[i] = i;
+		}
+		m->setIntTag(e,tags,value);
+	}
+}
+
+static void createRegionDOF(Output& o, apf::MeshTag* tags, int p)
+{
+	//loop through all edge, tag edge DOF
+	apf::Mesh* m = o.mesh;
+	apf::MeshEntity* e;
+	apf::MeshIterator* it = m->begin(1);
+	int* value = new int[p-1];
+	while ((e = m->iterate(it))) {
+	   for (int i = 0; i<p;i++)
+			{
+			value[i] = i;
+		}
+		m->setIntTag(e,tags,value);
+	}
+}
+*/
+
 static void getInterior(Output& o, BCs& bcs, apf::Numbering* n)
 {
   apf::Mesh* m = o.mesh;
   Blocks& bs = o.blocks.interior;
   int*** ien     = new int**[bs.getSize()];
+  int*** ienp     = new int**[bs.getSize()];
   int**  mattype = 0;
   if (bcs.fields.count("material type"))
     mattype = new int* [bs.getSize()];
   apf::NewArray<int> js(bs.getSize());
   for (int i = 0; i < bs.getSize(); ++i) {
     ien    [i] = new int*[bs.nElements[i]];
+    ienp    [i] = new int*[bs.nElements[i]];
     if (mattype)
       mattype[i] = new int [bs.nElements[i]];
     js[i] = 0;
@@ -93,11 +144,14 @@ static void getInterior(Output& o, BCs& bcs, apf::Numbering* n)
     int i = bs.keyToIndex[k];
     int j = js[i];
     ien[i][j] = new int[nv];
+    ienp[i][j] = new int[nv];
     apf::Downward v;
     getVertices(m, e, v);
     for (int k = 0; k < nv; ++k)
+    {
       ien[i][j][k] = apf::getNumber(n, v[k], 0, 0);
-
+	  ienp[i][j][k] = apf::getNumber(n, v[k], 0, 0);
+    }
     /* get material type */
     if (mattype) {
       gmi_ent* ge = (gmi_ent*)m->toModel(e);
@@ -115,6 +169,7 @@ static void getInterior(Output& o, BCs& bcs, apf::Numbering* n)
   for (int i = 0; i < bs.getSize(); ++i)
     assert(js[i] == bs.nElements[i]);
   o.arrays.ien     = ien;
+  o.arrays.ienp     = ienp;
   o.arrays.mattype = mattype;
 }
 
@@ -671,8 +726,17 @@ void generateOutput(Input& in, BCs& bcs, apf::Mesh* mesh, Output& o)
   getAllBlocks(o.mesh, bcs, o.blocks);
   apf::Numbering* n = apf::numberOverlapNodes(mesh, "ph_local");
   apf::Numbering* rn = apf::numberElements(o.mesh, "ph_elem");
+  std::cout<<" input "<<o.in<<"\n"; 
+  int p = 2;
+  apf::MeshTag* tags = mesh->createIntTag("edgeDOF",p-1);
+  
+  createEdgeDOF(o, tags,p);
   getVertexLinks(o, n, bcs);
   getInterior(o, bcs, n);
+  
+  //getHOInterior(o, bcs, n, f);
+  
+  
   getBoundary(o, bcs, n);
   getInterface(o, bcs, n);
   checkInterface(o,bcs);

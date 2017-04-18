@@ -31,6 +31,7 @@ struct EnsaArrays
    element j of
    interior block i */
   int*** ien;
+  int*** ienp;
 /* ienb[i][j][k] is the local vertex id of
    vertex k of
    element j of
