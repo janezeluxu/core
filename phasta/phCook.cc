@@ -15,7 +15,7 @@
 #include <phPartition.h>
 #include <phFilterMatching.h>
 #include "phInterfaceCutter.h"
-#include "phIO.h" //for chefio_initStats and chefio_printStats
+#include "phiotimer.h" //for phastaio_initStats and phastaio_printStats
 #include <parma.h>
 #include <apfMDS.h>
 #include <apfMesh2.h>
@@ -24,10 +24,10 @@
 #include <gmi_mesh.h>
 #include <PCU.h>
 #include <pcu_io.h>
+#include <pcu_util.h>
 #include <string>
 #include <stdlib.h>
 #include <cstring>
-#include <assert.h>
 #include <iostream>
 
 #define SIZET(a) static_cast<size_t>(a)
@@ -126,15 +126,21 @@ void originalMain(apf::Mesh2*& m, ph::Input& in,
 
 namespace chef {
   static FILE* openfile_read(ph::Input&, const char* path) {
-    return pcu_group_open(path, false);
+    FILE* f = NULL;
+    PHASTAIO_OPENTIME(f = pcu_group_open(path, false);)
+    return f;
   }
 
   static FILE* openfile_write(ph::Output&, const char* path) {
-    return pcu_group_open(path, true);
+    FILE* f = NULL;
+    PHASTAIO_OPENTIME(f = pcu_group_open(path, true);)
+    return f;
   }
 
   static FILE* openstream_write(ph::Output& out, const char* path) {
-    return openGRStreamWrite(out.grs, path);
+    FILE* f = NULL;
+    PHASTAIO_OPENTIME(f = openGRStreamWrite(out.grs, path);)
+    return f;
   }
 
   static FILE* openstream_read(ph::Input& in, const char* path) {
@@ -142,7 +148,7 @@ namespace chef {
     std::string restartStr("restart");
     FILE* f = NULL;
     if( fname.find(restartStr) != std::string::npos )
-      f = openRStreamRead(in.rs);
+      PHASTAIO_OPENTIME(f = openRStreamRead(in.rs);)
     else {
       fprintf(stderr,
         "ERROR %s type of stream %s is unknown... exiting\n",
@@ -181,7 +187,7 @@ namespace ph {
   }
 
   void preprocess(apf::Mesh2* m, Input& in, Output& out, BCs& bcs) {
-    chefio_initStats();
+    phastaio_initStats();
     if(PCU_Comm_Peers() > 1)
       ph::migrateInterfaceItr(m, bcs);
     if (in.simmetrixMesh == 0)
@@ -189,14 +195,15 @@ namespace ph {
     if (in.adaptFlag)
       ph::goToStepDir(in.timeStepNumber,in.ramdisk);
     std::string path = ph::setupOutputDir(in.ramdisk);
-    ph::setupOutputSubdir(path,in.ramdisk);
+    std::string subDirPath = path;
+    ph::setupOutputSubdir(subDirPath,in.ramdisk);
     ph::enterFilteredMatching(m, in, bcs);
     ph::generateOutput(in, bcs, m, out);
     ph::exitFilteredMatching(m);
+    // a path is not needed for inmem
+    ph::detachAndWriteSolution(in,out,m,subDirPath); //write restart
     if ( ! in.outMeshFileName.empty() )
       m->writeNative(in.outMeshFileName.c_str());
-    // a path is not needed for inmem
-    ph::detachAndWriteSolution(in,out,m,path); //write restart
     if ( in.writeGeomBCFiles ) {
       // store the value of the function pointer
       FILE* (*fn)(Output& out, const char* path) = out.openfile_write;
@@ -206,8 +213,9 @@ namespace ph {
       // reset the function pointer to the original value
       out.openfile_write = fn;
     }
-    ph::writeGeomBC(out, path); //write geombc
-    ph::writeAuxiliaryFiles(path, in.timeStepNumber);
+    ph::writeGeomBC(out, subDirPath); //write geombc
+    if(!PCU_Comm_Self())
+      ph::writeAuxiliaryFiles(path, in.timeStepNumber);
     m->verify();
 #ifdef HAVE_SIMMETRIX
     gmi_model* g = m->getModel();
@@ -215,11 +223,11 @@ namespace ph {
 #endif
     if (in.adaptFlag)
       ph::goToParentDir();
-    chefio_printStats();
+    if(in.printIOtime) phastaio_printStats();
   }
   void preprocess(apf::Mesh2* m, Input& in, Output& out) {
     gmi_model* g = m->getModel();
-    assert(g);
+    PCU_ALWAYS_ASSERT(g);
     BCs bcs;
     ph::readBCs(g, in.attributeFileName.c_str(), in.axisymmetry, bcs);
     if (!in.solutionMigration)
@@ -233,7 +241,7 @@ namespace ph {
 namespace chef {
   void bake(gmi_model*& g, apf::Mesh2*& m,
       ph::Input& in, ph::Output& out) {
-    assert(PCU_Comm_Peers() % in.splitFactor == 0);
+    PCU_ALWAYS_ASSERT(PCU_Comm_Peers() % in.splitFactor == 0);
     apf::Migration* plan = 0;
     ph::BCs bcs;
     loadCommon(in, bcs, g);

@@ -50,19 +50,21 @@ if(ENABLE_SIMMETRIX)
 endif(ENABLE_SIMMETRIX)
 
 set(MDIR ${MESHES}/phasta/loopDriver)
-if(ENABLE_SIMMETRIX)
+if(ENABLE_SIMMETRIX AND PCU_COMPRESS)
   mpi_test(ph_adapt 1
     ${CMAKE_CURRENT_BINARY_DIR}/ph_adapt
     "${MDIR}/model.smd"
     "${MDIR}/mesh_.smb"
     WORKING_DIRECTORY ${MDIR})
-endif(ENABLE_SIMMETRIX)
+endif(ENABLE_SIMMETRIX AND PCU_COMPRESS)
 
-mpi_test(pumi3d-1p 4
-  ./test_pumi
-  ${MESHES}/pumi/3d-1p/model.dmg
-  ${MESHES}/pumi/3d-1p/part.smb
-  out.smb 1 0)
+if(ENABLE_ZOLTAN)
+  mpi_test(pumi3d-1p 4
+    ./test_pumi
+    ${MESHES}/pumi/3d-1p/model.dmg
+    ${MESHES}/pumi/3d-1p/part.smb
+    out.smb 1 0)
+endif()
 mpi_test(test_scaling 1
   ./test_scaling
   ${MESHES}/cube/cube.dmg
@@ -113,6 +115,30 @@ mpi_test(verify_serial 1
   ./verify
   "${MDIR}/pipe.${GXT}"
   "pipe.smb")
+if(ENABLE_SIMMETRIX)
+  mpi_test(convert_2d_quads 1
+    ./convert
+    "${MESHES}/disk/disk.smd"
+    "${MESHES}/disk/disk_quad_mesh.sms"
+    "disk_quad_mesh.smb")
+else()
+  file(COPY "${MESHES}/disk/disk_quad_mesh0.smb" DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+endif()
+if(ENABLE_SIMMETRIX)
+  mpi_test(convert_2d_tris 1
+    ./convert
+    "${MESHES}/disk/disk.smd"
+    "${MESHES}/disk/disk_tri_mesh.sms"
+    "disk_tri_mesh.smb")
+else()
+  file(COPY "${MESHES}/disk/disk_tri_mesh0.smb" DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+endif()
+mpi_test(verify_2nd_order_shape_quads 1
+  ./verify_2nd_order_shapes
+  "disk_quad_mesh.smb")
+mpi_test(verify_2nd_order_shape_tris 1
+  ./verify_2nd_order_shapes
+  "disk_tri_mesh.smb")
 mpi_test(uniform_serial 1
   ./uniform
   "${MDIR}/pipe.${GXT}"
@@ -133,10 +159,12 @@ mpi_test(aniso_ma_serial 1
   ./aniso_ma_test
   "${MESHES}/cube/cube.dmg"
   "${MESHES}/cube/pumi670/cube.smb")
-mpi_test(torus_ma_paralle 4
-  ./torus_ma_test
-  "${MESHES}/torus/torus.dmg"
-  "${MESHES}/torus/4imb/torus.smb")
+if(ENABLE_ZOLTAN)
+  mpi_test(torus_ma_parallel 4
+    ./torus_ma_test
+    "${MESHES}/torus/torus.dmg"
+    "${MESHES}/torus/4imb/torus.smb")
+endif()
 mpi_test(tet_serial 1
   ./tetrahedronize
   "${MDIR}/pipe.${GXT}"
@@ -271,6 +299,13 @@ mpi_test(parmaSerial 1
   "${MESHES}/cube/cube.dmg"
   "${MESHES}/cube/pumi670/cube.smb"
   "cubeBal.smb/")
+if(ENABLE_ZOLTAN AND ENABLE_SIMMETRIX)
+  set(MDIR ${MESHES}/annular)
+  mpi_test(simZBalance_4 4
+    ./simZBalance
+    "${MDIR}/annular.smd"
+    "${MDIR}/annular_4_part.sms")
+endif()
 set(MDIR ${MESHES}/cube)
 if(ENABLE_ZOLTAN)
   mpi_test(ptnParma_cube 4
@@ -374,15 +409,17 @@ if(ENABLE_SIMMETRIX)
     ./ma_test
     "${MDIR}/upright.smd"
     "67k/")
-  set(MDIR ${MESHES}/curved)
-  mpi_test(curvedSphere 1
-    ./curvetest
-    "${MDIR}/sphere1.xmt_txt"
-    "${MDIR}/sphere1_4.smb")
-  mpi_test(curvedKova 1
-    ./curvetest
-    "${MDIR}/Kova.xmt_txt"
-    "${MDIR}/Kova.smb")
+  if(SIM_PARASOLID)
+    set(MDIR ${MESHES}/curved)
+    mpi_test(curvedSphere 1
+      ./curvetest
+      "${MDIR}/sphere1.xmt_txt"
+      "${MDIR}/sphere1_4.smb")
+    mpi_test(curvedKova 1
+      ./curvetest
+      "${MDIR}/Kova.xmt_txt"
+      "${MDIR}/Kova.smb")
+  endif(SIM_PARASOLID)
 endif()
 if (PCU_COMPRESS)
   if(ENABLE_SIMMETRIX)
@@ -400,11 +437,11 @@ if (PCU_COMPRESS)
   set(MDIR ${MESHES}/phasta/1-1-Chef-Tet-Part)
   if(ENABLE_SIMMETRIX)
     add_test(NAME chef1
-      COMMAND diff -r -x .svn ${RUNDIR}/1-procs_case/ good_phasta/
+      COMMAND diff -r ${RUNDIR}/1-procs_case/ good_phasta/
       WORKING_DIRECTORY ${MDIR})
   endif()
   add_test(NAME chef2
-    COMMAND diff -r -x .svn out_mesh/ good_mesh/
+    COMMAND diff -r out_mesh/ good_mesh/
     WORKING_DIRECTORY ${MDIR})
   if(ENABLE_ZOLTAN)
     mpi_test(chef3 2 ${CMAKE_CURRENT_BINARY_DIR}/chef
@@ -419,11 +456,11 @@ if (PCU_COMPRESS)
     WORKING_DIRECTORY ${MDIR}/${RUNDIR})
   if(ENABLE_SIMMETRIX)
     add_test(NAME chef7
-      COMMAND diff -r -x .svn ${RUNDIR}/4-procs_case/ good_phasta/
+      COMMAND diff -r ${RUNDIR}/4-procs_case/ good_phasta/
       WORKING_DIRECTORY ${MDIR})
   endif()
   add_test(NAME chef8
-    COMMAND diff -r -x .svn out_mesh/ good_mesh/
+    COMMAND diff -r out_mesh/ good_mesh/
     WORKING_DIRECTORY ${MDIR})
   if(ENABLE_SIMMETRIX)
     mpi_test(chef9 2 ${CMAKE_CURRENT_BINARY_DIR}/chef

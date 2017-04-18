@@ -24,7 +24,8 @@ enum PUMI_EntTopology {
   PUMI_TET,  // 4
   PUMI_HEX,  // 5 
   PUMI_PRISM, // 6
-  PUMI_PYRAMID // 7
+  PUMI_PYRAMID, // 7
+  ENT_TOPOLOGIES
 };
 
 enum PUMI_FieldType {
@@ -32,7 +33,7 @@ enum PUMI_FieldType {
   PUMI_VECTOR, // a 3D vector
   PUMI_MATRIX, // a 3x3 matrix 
   PUMI_PACKED, // a user-defined set of components
-  VALUE_TYPES
+  FIELD_TYPES
 };
 class gEntity;
 class mPartEntityContainer;
@@ -75,6 +76,7 @@ typedef apf::FieldShape* pShape;
 typedef apf::Numbering* pNumbering;
 typedef apf::GlobalNumbering* pGlobalNumbering;
 typedef apf::Vector3 Vector3; // 3d vector
+typedef apf::Adjacent Adjacent; // adjacency container
 
 // singleton to save model/mesh
 class pumi
@@ -193,6 +195,13 @@ pMesh pumi_mesh_load(pGeom geom, const char* fileName, int num_in_part, const ch
 
 // delete mesh
 void pumi_mesh_delete(pMesh m);
+
+// create/delete direct Adjacency for all entities except for one-level apart
+bool pumi_mesh_hasAdjacency(pMesh m, int from_dim, int to_dim);
+void pumi_mesh_createAdjacency(pMesh m, int from_dim, int to_dim);
+void pumi_mesh_deleteAdjacency(pMesh m, int from_dim, int to_dim);
+void pumi_mesh_createFullAdjacency(pMesh m);
+
 // write mesh into a file - mesh_type should be "mds" or "vtk"
 void pumi_mesh_write (pMesh m, const char* fileName, const char* mesh_type="mds");
 pGeom pumi_mesh_getGeom(pMesh m);
@@ -327,7 +336,7 @@ void pumi_mesh_deleteGlobalID(pMesh m);
 void pumi_mesh_verify(pMesh m, bool abort_on_error=true);
 
 // print mesh size info - global and local
-void pumi_mesh_print(pMesh m, int p=0);
+void pumi_mesh_print(pMesh m, int print_ent=0);
 
 //************************************
 //  Mesh Entity
@@ -346,11 +355,13 @@ int pumi_ment_getGlobalID(pMeshEnt e);
 // get # adjacent entities
 int pumi_ment_getNumAdj(pMeshEnt e, int tgtType);
 
-// get adjacent entities
+// get adjacent entitities with std::vector
 void pumi_ment_getAdj(pMeshEnt e, int tgtType, std::vector<pMeshEnt>& vecAdjEnt);
-
-// get 2nd-order adjacent entities
 void pumi_ment_get2ndAdj (pMeshEnt e, int brgType, int tgtType, std::vector<pMeshEnt>& vecAdjEnt);
+
+// get adjacent entitities with Adjacenct and return #result entities (faster than std::vector)
+int pumi_ment_getAdjacent(pMeshEnt e, int tgtType, Adjacent& result);
+int pumi_ment_get2ndAdjacent(pMeshEnt e, int brgType, int tgtType, Adjacent& result);
 
 // return entity's geometric classification
 pGeomEnt pumi_ment_getGeomClas(pMeshEnt e);
@@ -458,7 +469,7 @@ pGlobalNumbering pumi_numbering_createGlobal(pMesh m, const char* name,
                  pShape shape=NULL, int num_component=1);
 void pumi_numbering_deleteGlobal(pGlobalNumbering gn);
 int pumi_mesh_getNumGlobalNumbering (pMesh m);
-void pumi_mesh_getGlobalNumbering (pMesh m, std::vector<pGlobalNumbering>& numberings);
+pGlobalNumbering pumi_mesh_getGlobalNumbering (pMesh m, int i);
 
 pNumbering pumi_numbering_create (pMesh m, const char* name, pShape shape=NULL, int num_component=1);
 pNumbering pumi_numbering_createOwned (pMesh m, const char* name, int dim);
@@ -482,7 +493,8 @@ void pumi_field_accumulate(pField f);
 void pumi_field_freeze(pField f);
 void pumi_field_unfreeze(pField f);
 pField pumi_mesh_findField(pMesh m, const char* name);
-void pumi_mesh_getField(pMesh m, std::vector<pField>&);
+int pumi_mesh_getNumField(pMesh m);
+pField pumi_mesh_getField(pMesh m, int i);
 void pumi_ment_getField (pMeshEnt e, pField f, int i, double* dof_data);
 void pumi_ment_setField (pMeshEnt e, pField f, int i, double* dof_data);
 // verify field

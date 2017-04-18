@@ -2,13 +2,17 @@
 #include <apfMesh.h>
 #include <gmi_mesh.h>
 #include <PCU.h>
+#include <pumi_version.h>
 #ifdef HAVE_SIMMETRIX
 #include <gmi_sim.h>
 #include <SimUtil.h>
 #include <SimPartitionedMesh.h>
 #endif
-#include <cassert>
+#include <pcu_util.h>
 #include <chef.h>
+
+/** \file chef.cc
+    \brief The Chef command line executable. */
 
 namespace {
   void freeMesh(apf::Mesh* m) {
@@ -17,11 +21,14 @@ namespace {
   }
 }
 
+/** @brief run the operations requested in "adapt.inp" */
 int main(int argc, char** argv)
 {
   MPI_Init(&argc,&argv);
   PCU_Comm_Init();
   PCU_Protect();
+  if( !PCU_Comm_Self() )
+    printf("PUMI Git hash %s\n", pumi_version());
 #ifdef HAVE_SIMMETRIX
   Sim_readLicenseFile(0);
   SimPartitionedMesh_start(0, 0);

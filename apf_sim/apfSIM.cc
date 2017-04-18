@@ -8,7 +8,7 @@
 #include <gmi_sim.h>
 #include <apf_simConfig.h>
 #include <cstdlib>
-#include <cassert>
+#include <pcu_util.h>
 #include <algorithm>
 
 #ifdef USE_FIELDSIM
@@ -233,6 +233,25 @@ int MeshSIM::getOwner(MeshEntity* e)
   return EN_ownerProc(reinterpret_cast<pEntity>(e));
 }
 
+bool MeshSIM::hasAdjacency(int from_dim, int to_dim)
+{
+  return (abs(from_dim-to_dim)==1);
+}
+
+void MeshSIM::createAdjacency(int from_dim, int to_dim)
+{
+  (void)from_dim;
+  (void)to_dim;
+  apf::fail("MeshSIM::createAdjacency called!\n");
+}
+
+void MeshSIM::deleteAdjacency(int from_dim, int to_dim)
+{
+  (void)from_dim;
+  (void)to_dim;
+  apf::fail("MeshSIM::deleteAdjacency called!\n");
+}
+
 static int pListToArray(pPList list, MeshEntity** array)
 {
   int n = PList_size(list);
@@ -406,10 +425,10 @@ MeshEntity* MeshSIM::getUpward(MeshEntity* e, int i)
   if (ent_type == Tface)
   {
     int a = 0;
-    for (int i=0; i < 2; ++i)
+    for (int j = 0; j < 2; ++j)
     {
       MeshEntity* r = reinterpret_cast<MeshEntity*>(
-          F_region(reinterpret_cast<pFace>(entity),i));
+          F_region(reinterpret_cast<pFace>(entity),j));
       if ((r)&&(a++ == i)) return r;
     }
   }
@@ -878,7 +897,7 @@ void MeshSIM::destroyNative()
 
 void MeshSIM::verify()
 {
-  assert(PM_verify(mesh,0,NULL));
+  PCU_ALWAYS_ASSERT(PM_verify(mesh,0,NULL));
 }
 
 void MeshSIM::getMatches(MeshEntity* e, Matches& m)
@@ -907,7 +926,7 @@ void MeshSIM::getMatches(MeshEntity* e, Matches& m)
     m[j].entity = reinterpret_cast<MeshEntity*>(match_ent);
     j++;
   }
-  assert(EN_isOwnerProc(ent)?j == n - 1:j == n);
+  PCU_ALWAYS_ASSERT(EN_isOwnerProc(ent)?j == n - 1:j == n);
   PList_delete(l);
 }
 
@@ -941,6 +960,24 @@ static bool isQuadratic(pParMesh mesh)
   return result;
 }
 
+static bool hasAnySerendipity(pParMesh mesh)
+{
+  pMesh part = PM_mesh(mesh,0);
+  FIter it = M_faceIter(part);
+  pFace e;
+  bool result = false;
+  while ((e = FIter_next(it)))
+  {
+    if (F_numEdges(e) == 4)
+    {
+      result = true;
+      break;
+    }
+  }
+  FIter_delete(it);
+  return result;
+}
+
 static bool findMatches(Mesh* m)
 {
   bool found = false;
@@ -969,12 +1006,19 @@ static bool findMatches(Mesh* m)
 Mesh2* createMesh(pParMesh mesh)
 {
   /* require one part per process currently for SIM */
-  assert(PM_numParts(mesh)==1);
+  PCU_ALWAYS_ASSERT(PM_numParts(mesh)==1);
   MeshSIM* m = new MeshSIM(mesh);
   int order = 1;
-  if (isQuadratic(mesh))
+  bool serendipity = false;
+  if (isQuadratic(mesh)) {
     order = 2;
-  m->init(getLagrange(order));
+    if (hasAnySerendipity(mesh))
+      serendipity = true;
+  }
+  if (serendipity)
+    m->init(getSerendipity());
+  else
+    m->init(getLagrange(order));
   m->hasMatches = findMatches(m);
   return m;
 }

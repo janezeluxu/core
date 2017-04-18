@@ -10,7 +10,7 @@
 #include "maInput.h"
 #include <apfShape.h>
 #include <cstdio>
-#include <cassert>
+#include <pcu_util.h>
 #include <cstdlib>
 
 namespace ma {
@@ -40,7 +40,7 @@ void setDefaultValues(Input* in)
     in->maximumEdgeRatio = 2.0;
   }
   else
-  { assert(in->mesh->getDimension()==2);
+  { PCU_ALWAYS_ASSERT(in->mesh->getDimension()==2);
     //old MA says .04, but that rarely kicks in.
     //.2 is strict, but at least quality goes up
     in->goodQuality = 0.2;
@@ -55,6 +55,7 @@ void setDefaultValues(Input* in)
   in->shouldRunMidZoltan = false;
   in->shouldRunMidParma = false;
   in->shouldRunPostZoltan = false;
+  in->shouldRunPostZoltanRib = false;
   in->shouldRunPostParma = false;
   in->shouldTurnLayerToTets = false;
   in->shouldCleanupLayer = false;
@@ -146,7 +147,7 @@ Input* configure(
    the metric field, which has its own built-in
    solution transfer */
   Input* in = configure(m,s);
-  in->sizeField = makeSizeField(m, f);
+  in->sizeField = makeSizeField(m, f, 1);
   return in;
 }
 
