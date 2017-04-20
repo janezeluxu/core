@@ -42,7 +42,7 @@ void getInteriorOrder(Output& o, int block, apf::DynamicArray<int>& c)
   for (int vert = 0; vert < nvert; ++vert)
     for (int elem = 0; elem < nelem; ++elem)
       c[i++] = o.arrays.ienp[block][elem][vert] + 1; /* FORTRAN indexing */
-  assert(i == c.getSize());
+  PCU_ALWAYS_ASSERT(i == c.getSize());
 }
 
 
