@@ -77,23 +77,7 @@ static void createEdgeDOF(Output& o, apf::MeshTag* tags, int p)
 	apf::MeshIterator* it = m->begin(1);
 	int* value = new int[p-1];
 	while ((e = m->iterate(it))) {
-	   for (int i = 0; i<p;i++)
-			{
-			value[i] = i;
-		}
-		m->setIntTag(e,tags,value);
-	}
-}
-/*
-static void createFaceDOF(Output& o, apf::MeshTag* tags, int p)
-{
-	//loop through all edge, tag edge DOF
-	apf::Mesh* m = o.mesh;
-	apf::MeshEntity* e;
-	apf::MeshIterator* it = m->begin(1);
-	int* value = new int[p-1];
-	while ((e = m->iterate(it))) {
-	   for (int i = 0; i<p;i++)
+	   for (int i = 0; i<p-1;i++)
 			{
 			value[i] = i;
 		}
@@ -101,22 +85,40 @@ static void createFaceDOF(Output& o, apf::MeshTag* tags, int p)
 	}
 }
 
-static void createRegionDOF(Output& o, apf::MeshTag* tags, int p)
+static void createFaceDOF(Output& o, apf::MeshTag* tags, int faceMode)
 {
-	//loop through all edge, tag edge DOF
+	//loop through all face, tag face DOF
 	apf::Mesh* m = o.mesh;
 	apf::MeshEntity* e;
-	apf::MeshIterator* it = m->begin(1);
-	int* value = new int[p-1];
+	apf::MeshIterator* it = m->begin(2);
+	//int faceMode = 0.5*(p-1)*(p-2);
+	int* value = new int[faceMode];
 	while ((e = m->iterate(it))) {
-	   for (int i = 0; i<p;i++)
+	   for (int i = 0; i<faceMode;i++)
 			{
 			value[i] = i;
 		}
 		m->setIntTag(e,tags,value);
 	}
 }
-*/
+
+static void createRegionDOF(Output& o, apf::MeshTag* tags, int regionMode)
+{
+	//loop through all region, tag region DOF
+	apf::Mesh* m = o.mesh;
+	apf::MeshEntity* e;
+	apf::MeshIterator* it = m->begin(3);
+	//int regionMode = (1/3)*(p-1)*(p-2)*(p-3);
+	int* value = new int[regionMode];
+	while ((e = m->iterate(it))) {
+	   for (int i = 0; i<regionMode;i++)
+			{
+			value[i] = i;
+		}
+		m->setIntTag(e,tags,value);
+	}
+}
+
 
 static void getInterior(Output& o, BCs& bcs, apf::Numbering* n)
 {
@@ -729,10 +731,23 @@ void generateOutput(Input& in, BCs& bcs, apf::Mesh* mesh, Output& o)
   apf::Numbering* n = apf::numberOverlapNodes(mesh, "ph_local");
   apf::Numbering* rn = apf::numberElements(o.mesh, "ph_elem");
   std::cout<<" input "<<o.in<<"\n"; 
-  int p = 2;
-  apf::MeshTag* tags = mesh->createIntTag("edgeDOF",p-1);
   
-  createEdgeDOF(o, tags,p);
+  int p = 2;
+  if (p>1){
+  apf::MeshTag* tags = mesh->createIntTag("edgeDOF",p-1);
+    createEdgeDOF(o, tags,p);
+	}
+  int faceMode = 0.5*(p-1)*(p-2);
+  if (faceMode>0){
+	apf::MeshTag* tags = mesh->createIntTag("faceDOF",faceMode);
+	createFaceDOF(o,tags,faceMode);
+	}
+  int regionMode = (1/3)*(p-1)*(p-2)*(p-3);
+  if (regionMode>0){
+	apf::MeshTag* tags = mesh->createIntTag("RegionDOF",regionMode);
+	createRegionDOF(o,tags,regionMode);
+	}
+	
   getVertexLinks(o, n, bcs);
   getInterior(o, bcs, n);
   
