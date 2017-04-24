@@ -13,6 +13,7 @@ namespace ph {
 
 static void setDefaults(Input& in)
 {
+  in.GlobalP = 1;
   in.timeStepNumber = 0;
   in.ensa_dof = 0;
   in.ensa_melas_dof = 0; 
@@ -85,6 +86,8 @@ static void formMaps(Input& in, StringMap& stringMap, IntMap& intMap, DblMap& db
 {
   intMap["timeStepNumber"] = &in.timeStepNumber;
   intMap["ensa_dof"] = &in.ensa_dof;
+  intMap["GlobalP"] = &in.GlobalP;
+  
   intMap["ensa_melas_dof"] = &in.ensa_melas_dof;
   stringMap["restartFileName"] = &in.restartFileName;
   stringMap["attributeFileName"] = &in.attributeFileName;
@@ -157,7 +160,7 @@ typedef std::set<std::string> stringset;
 
 static void makeDeprecated(stringset& old)
 {
-  old.insert("globalP");
+  //old.insert("globalP");
   old.insert("numSplit");
   old.insert("ParmaPtn");
   old.insert("RecursivePtn");

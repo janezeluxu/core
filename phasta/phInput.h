@@ -33,6 +33,7 @@ class Input
       for single phase flow with no turbulence model and 7 for
       two phase flows with level set scalars. */
     int ensa_dof;
+    int GlobalP;
     int ensa_melas_dof;
     /** \brief  path to the restart files
         \details this will be read in when solution migration is activated.

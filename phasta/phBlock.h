@@ -24,6 +24,7 @@ enum {
 struct BlockKey
 {
   int nElementVertices;
+  int nElementDOF;
   int polynomialOrder;
   int nBoundaryFaceEdges;
   int elementType;
@@ -47,6 +48,7 @@ struct BlocksCommon
   Map keyToIndex;
   int nElements[MAX_BLOCK_KEYS];
   int nElementNodes[MAX_BLOCK_KEYS];
+  int nElementDof[MAX_BLOCK_KEYS];
   int getSize()
   {
     return keyToIndex.size();
@@ -70,7 +72,7 @@ struct AllBlocks
   BlocksInterface interface;
 };
 
-void getAllBlocks(apf::Mesh* m, BCs& bcs, AllBlocks& b);
+void getAllBlocks(apf::Mesh* m, BCs& bcs, AllBlocks& b, int p);
 
 std::string getBlockKeyPhrase(BlockKey& b, const char* prefix);
 std::string getBlockKeyPhraseInterface
@@ -79,7 +81,7 @@ std::string getBlockKeyPhraseInterface
   const char* prefix
 );
 
-void getInteriorBlockKey(apf::Mesh* m, apf::MeshEntity* e, BlockKey& k);
+void getInteriorBlockKey(apf::Mesh* m, apf::MeshEntity* e, BlockKey& k, int p);
 void getBoundaryBlockKey(apf::Mesh* m, apf::MeshEntity* e,
     apf::MeshEntity* f, BlockKey& k);
 void getInterfaceBlockKey

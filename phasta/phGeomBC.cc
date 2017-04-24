@@ -36,12 +36,26 @@ void getInteriorConnectivity(Output& o, int block, apf::DynamicArray<int>& c)
 void getInteriorOrder(Output& o, int block, apf::DynamicArray<int>& c)
 {
   int nelem = o.blocks.interior.nElements[block];
-  int nvert = o.blocks.interior.keys[block].nElementVertices;
-  c.setSize(nelem * nvert);
+  //int nvert = o.blocks.interior.keys[block].nElementVertices;
+  int totalDOF = o.blocks.interior.keys[block].nElementDOF;
+  c.setSize(nelem * totalDOF);
   size_t i = 0;
-  for (int vert = 0; vert < nvert; ++vert)
+  for (int vert = 0; vert < totalDOF; ++vert)
     for (int elem = 0; elem < nelem; ++elem)
       c[i++] = o.arrays.ienp[block][elem][vert] + 1; /* FORTRAN indexing */
+  PCU_ALWAYS_ASSERT(i == c.getSize());
+}
+
+void getInteriorSolution(Output& o, int block, apf::DynamicArray<int>& c)
+{
+  int nelem = o.blocks.interior.nElements[block];
+  //int nvert = o.blocks.interior.keys[block].nElementVertices;
+  int totalDOF = o.blocks.interior.keys[block].nElementDOF;
+  c.setSize(nelem * totalDOF);
+  size_t i = 0;
+  for (int vert = 0; vert < totalDOF; ++vert)
+    for (int elem = 0; elem < nelem; ++elem)
+      c[i++] = o.arrays.ienSolution[block][elem][vert] + 1; 
   PCU_ALWAYS_ASSERT(i == c.getSize());
 }
 
@@ -171,6 +185,16 @@ void fillBlockKeyParams(int* params, BlockKey& k)
   params[6] = k.elementType;
 }
 
+void fillBlockKeySolutionParams(int* params, BlockKey& k)
+{
+  params[1] = k.nElementDOF;
+  params[2] = k.polynomialOrder;
+  params[3] = k.nElementVertices; /* num nodes */
+  params[4] = k.nBoundaryFaceEdges; /* num boundary nodes */
+  params[5] = k.nBoundaryFaceEdges;
+  params[6] = k.elementType;
+}
+
 void fillBlockKeyInterfaceParams
 (
   int* params,
@@ -199,11 +223,16 @@ void writeBlocks(FILE* f, Output& o)
     getInteriorConnectivity(o, i, c);
     ph_write_ints(f, phrase.c_str(), &c[0], c.getSize(), 7, params);
     
-    //phrase = getBlockKeyPhrase(k, "pOrder interior ");
-    phrase = "porder interior "; 
+    fillBlockKeySolutionParams(params, k);
+    phrase = "interior order"; 
     getInteriorOrder(o, i, c);
     ph_write_ints(f, phrase.c_str(), &c[0], c.getSize(), 7, params);
-    std::cout<<" orderPhrase "<<phrase.c_str()<<"\n"; 
+    std::cout<<" orderPhrase "<<phrase.c_str()<<params[0]<<"\n"; 
+    
+    phrase = "interior Solution"; 
+    getInteriorSolution(o, i, c);
+    ph_write_ints(f, phrase.c_str(), &c[0], c.getSize(), 7, params);
+    std::cout<<"Phrase "<<phrase.c_str()<<"\n"; 
     
     if (o.arrays.mattype) {
       phrase = getBlockKeyPhrase(k, "material type interior ");

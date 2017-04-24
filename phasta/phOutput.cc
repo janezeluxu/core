@@ -69,70 +69,203 @@ static void getVertexLinks(Output& o, apf::Numbering* n, BCs& bcs)
   encodeILWORK(n, links, o.nlwork, o.arrays.ilwork);
 }
 
-static void createEdgeDOF(Output& o, apf::MeshTag* tags, int p)
+static void createEdgeDOF(Output& o, apf::MeshTag* tags, int edgeMode, int& Vcount, int& edgeDOFcount)
 {
-	//loop through all edge, tag edge DOF
+	
 	apf::Mesh* m = o.mesh;
 	apf::MeshEntity* e;
+	apf::MeshEntity* v;
+	//loop through all vertex, get the total vertex number
+	apf::MeshIterator* itv = m->begin(0);
+	while ((v = m->iterate(itv))) {
+		Vcount = Vcount+1;
+	}
+	
+	//loop through all edge, tag edge DOF
 	apf::MeshIterator* it = m->begin(1);
-	int* value = new int[p-1];
+	int* value = new int[edgeMode];
+	edgeDOFcount = Vcount;
 	while ((e = m->iterate(it))) {
-	   for (int i = 0; i<p-1;i++)
+	   for (int i = 0; i<edgeMode;i++)
 			{
-			value[i] = i;
+			value[i] = edgeDOFcount;
+			edgeDOFcount = edgeDOFcount+1;
+			//std::cout<<" value "<<value[i]<<"\n";
 		}
 		m->setIntTag(e,tags,value);
 	}
 }
 
-static void createFaceDOF(Output& o, apf::MeshTag* tags, int faceMode)
+static void createFaceDOF(Output& o, apf::MeshTag* tags, int faceMode, int edgeDOFcount, int& faceDOFcount)
 {
 	//loop through all face, tag face DOF
 	apf::Mesh* m = o.mesh;
 	apf::MeshEntity* e;
 	apf::MeshIterator* it = m->begin(2);
-	//int faceMode = 0.5*(p-1)*(p-2);
+	faceDOFcount = edgeDOFcount;
 	int* value = new int[faceMode];
 	while ((e = m->iterate(it))) {
 	   for (int i = 0; i<faceMode;i++)
 			{
-			value[i] = i;
+			value[i] = faceDOFcount;
+			faceDOFcount = faceDOFcount+1;
 		}
 		m->setIntTag(e,tags,value);
 	}
 }
 
-static void createRegionDOF(Output& o, apf::MeshTag* tags, int regionMode)
+static void createRegionDOF(Output& o, apf::MeshTag* tags, int regionMode, int faceDOFcount, int& regionDOFcount)
 {
 	//loop through all region, tag region DOF
 	apf::Mesh* m = o.mesh;
 	apf::MeshEntity* e;
 	apf::MeshIterator* it = m->begin(3);
-	//int regionMode = (1/3)*(p-1)*(p-2)*(p-3);
+	regionDOFcount = faceDOFcount;
 	int* value = new int[regionMode];
 	while ((e = m->iterate(it))) {
 	   for (int i = 0; i<regionMode;i++)
 			{
-			value[i] = i;
+			value[i] = regionDOFcount;
+			regionDOFcount = regionDOFcount+1;
 		}
 		m->setIntTag(e,tags,value);
 	}
 }
 
+static void TagAllDOF(Output& o, int edgeMode, int faceMode, int regionMode, int& Vcount, int& edgeDOFcount, int& faceDOFcount, int& regionDOFcount)
+{   
+	  apf::MeshTag* edgetags = o.mesh->createIntTag("edgeDOF",edgeMode);
+	  apf::MeshTag* facetags = o.mesh->createIntTag("faceDOF",faceMode);
+	  apf::MeshTag* regiontags = o.mesh->createIntTag("RegionDOF",regionMode);
+	if (edgeMode>0){
+    createEdgeDOF(o, edgetags,edgeMode,Vcount,edgeDOFcount);
+	}
+  if (faceMode>0){
+	createFaceDOF(o,facetags,faceMode,edgeDOFcount,faceDOFcount);
+	}
+  if (regionMode>0){
+	createRegionDOF(o,regiontags,regionMode,faceDOFcount,regionDOFcount);
+	}
+}
+
+
+static void getInteriorIEN(Output& o, apf::Numbering* n, int edgeMode, int faceMode, int regionMode)
+{
+  apf::Mesh* m = o.mesh;
+  Blocks& bs = o.blocks.interior;
+  int*** ien     = new int**[bs.getSize()];
+  int*** ienp     = new int**[bs.getSize()];
+  apf::NewArray<int> js(bs.getSize());
+  for (int i = 0; i < bs.getSize(); ++i) {
+    ien    [i] = new int*[bs.nElements[i]];
+    ienp    [i] = new int*[bs.nElements[i]];
+    js[i] = 0;
+  }
+  
+  apf::MeshTag* edgetag = m->findTag("edgeDOF");
+  apf::MeshTag* facetag = m->findTag("faceDOF");
+  apf::MeshTag* regiontag = m->findTag("RegionDOF");
+  
+  int* tageedgeTemp = new int[edgeMode];
+  int* tagfaceTemp = new int[faceMode];  
+  int* tagregionTemp = new int[regionMode];  
+  int p = edgeMode+1;
+  //gmi_model* gm = m->getModel();
+  apf::MeshEntity* e;
+  apf::MeshIterator* it = m->begin(m->getDimension());
+  int eleN = 0;
+  while ((e = m->iterate(it))) {
+    BlockKey k;
+    getInteriorBlockKey(m, e, k,2);
+    int nv = k.nElementVertices;
+    PCU_ALWAYS_ASSERT(bs.keyToIndex.count(k));
+    int i = bs.keyToIndex[k];
+    int j = js[i];
+    apf::Downward edge;
+	int NodeNumE = m->getDownward(e,1,edge);
+	apf::Downward f;
+	int NodeNumF = m->getDownward(e,2,f);
+	int EtotalDOF = k.nElementDOF;
+    //std::cout<<" EtotalDOF "<<EtotalDOF<<"\n"; 
+    ien[i][j] = new int[EtotalDOF];
+    ienp[i][j] = new int[EtotalDOF];
+    eleN++;
+    apf::Downward v;
+    getVertices(m, e, v);
+    //std::cout<<" eleN "<<eleN<<"\n"; 
+    int count = 0;
+    for (int k = 0; k < nv; ++k)
+    {
+      ien[i][j][k] = apf::getNumber(n, v[k], 0, 0);
+	  ienp[i][j][k] = p;
+	  count++;
+	  //std::cout<<" count "<<count-1<<" tagtemp "<<ien[i][j][k]<<"\n"; 
+    }
+    
+    if (edgeMode>0){
+		
+		for(int edgeN = 0; edgeN<NodeNumE; edgeN++){
+			m->getIntTag(edge[edgeN],edgetag,tageedgeTemp);
+			for (int k = 0; k < edgeMode; ++k)
+			{
+				//std::cout<<" tagtemp "<<tageedgeTemp[k]<<"\n"; 
+				ien[i][j][count-1] = tageedgeTemp[k];
+				ienp[i][j][count-1] = p;
+				count++;
+				//std::cout<<" count "<<count-1<<" tagtemp "<<tageedgeTemp[k]<<"\n"; 
+			}
+		}
+	}
+	
+	
+	if (faceMode>0){
+		for(int faceN = 0; faceN<NodeNumF; faceN++){
+			m->getIntTag(f[faceN],facetag,tagfaceTemp);
+			for (int k = 0; k < faceMode; ++k)
+			{
+				//std::cout<<" tagtemp "<<tageedgeTemp[k]<<"\n"; 
+				ien[i][j][count-1] = tagfaceTemp[k];
+				ienp[i][j][count-1] = p;
+				count++;
+				//std::cout<<" count "<<count-1<<" tagtemp "<<tagfaceTemp[k]<<"\n"; 
+			}
+		}
+    }
+    
+	if (regionMode>0){ 
+		m->getIntTag(e,regiontag,tagregionTemp);   
+		for (int k = 0; k < regionMode; ++k)
+		{
+			ien[i][j][count-1] = tagregionTemp[k];
+			ienp[i][j][count-1] = p;
+			count++;
+			//std::cout<<" count "<<count-1<<" tagtemp "<<tagregionTemp[k]<<"\n";
+		}
+    }
+    
+    ++js[i];
+  }
+  m->end(it);
+  
+  for (int i = 0; i < bs.getSize(); ++i)
+    PCU_ALWAYS_ASSERT(js[i] == bs.nElements[i]);
+  o.arrays.ienSolution     = ien;
+  o.arrays.ienp     = ienp;
+}
 
 static void getInterior(Output& o, BCs& bcs, apf::Numbering* n)
 {
   apf::Mesh* m = o.mesh;
   Blocks& bs = o.blocks.interior;
   int*** ien     = new int**[bs.getSize()];
-  int*** ienp     = new int**[bs.getSize()];
+  //int*** ienp     = new int**[bs.getSize()];
   int**  mattype = 0;
   if (bcs.fields.count("material type"))
     mattype = new int* [bs.getSize()];
   apf::NewArray<int> js(bs.getSize());
   for (int i = 0; i < bs.getSize(); ++i) {
     ien    [i] = new int*[bs.nElements[i]];
-    ienp    [i] = new int*[bs.nElements[i]];
+    //ienp    [i] = new int*[bs.nElements[i]];
     if (mattype)
       mattype[i] = new int [bs.nElements[i]];
     js[i] = 0;
@@ -142,19 +275,19 @@ static void getInterior(Output& o, BCs& bcs, apf::Numbering* n)
   apf::MeshIterator* it = m->begin(m->getDimension());
   while ((e = m->iterate(it))) {
     BlockKey k;
-    getInteriorBlockKey(m, e, k);
+    getInteriorBlockKey(m, e, k,2);
     int nv = k.nElementVertices;
     PCU_ALWAYS_ASSERT(bs.keyToIndex.count(k));
     int i = bs.keyToIndex[k];
     int j = js[i];
     ien[i][j] = new int[nv];
-    ienp[i][j] = new int[nv];
+    //ienp[i][j] = new int[nv];
     apf::Downward v;
     getVertices(m, e, v);
     for (int k = 0; k < nv; ++k)
     {
       ien[i][j][k] = apf::getNumber(n, v[k], 0, 0);
-	  ienp[i][j][k] = apf::getNumber(n, v[k], 0, 0);
+	  //ienp[i][j][k] = apf::getNumber(n, v[k], 0, 0);
     }
     /* get material type */
     if (mattype) {
@@ -173,7 +306,7 @@ static void getInterior(Output& o, BCs& bcs, apf::Numbering* n)
   for (int i = 0; i < bs.getSize(); ++i)
     PCU_ALWAYS_ASSERT(js[i] == bs.nElements[i]);
   o.arrays.ien     = ien;
-  o.arrays.ienp     = ienp;
+  //o.arrays.ienp     = ienp;
   o.arrays.mattype = mattype;
 }
 
@@ -724,35 +857,29 @@ void generateOutput(Input& in, BCs& bcs, apf::Mesh* mesh, Output& o)
   double t0 = PCU_Time();
   o.in = &in;
   o.mesh = mesh;
+  int p = in.GlobalP;
+  std::cout<<" p Order "<<p<<"\n"; 
   getCounts(o);
   getCoordinates(o);
   getGlobal(o);
-  getAllBlocks(o.mesh, bcs, o.blocks);
+  getAllBlocks(o.mesh, bcs, o.blocks,p);
   apf::Numbering* n = apf::numberOverlapNodes(mesh, "ph_local");
   apf::Numbering* rn = apf::numberElements(o.mesh, "ph_elem");
-  std::cout<<" input "<<o.in<<"\n"; 
   
-  int p = 2;
-  if (p>1){
-  apf::MeshTag* tags = mesh->createIntTag("edgeDOF",p-1);
-    createEdgeDOF(o, tags,p);
-	}
+  int Vcount =0;
+  int edgeDOFcount = 0;
+  int faceDOFcount = 0;
+  int regionDOFcount = 0;
+  int edgeMode = p-1;
   int faceMode = 0.5*(p-1)*(p-2);
-  if (faceMode>0){
-	apf::MeshTag* tags = mesh->createIntTag("faceDOF",faceMode);
-	createFaceDOF(o,tags,faceMode);
-	}
   int regionMode = (1/3)*(p-1)*(p-2)*(p-3);
-  if (regionMode>0){
-	apf::MeshTag* tags = mesh->createIntTag("RegionDOF",regionMode);
-	createRegionDOF(o,tags,regionMode);
-	}
-	
+  TagAllDOF(o, edgeMode, faceMode, regionMode, Vcount, edgeDOFcount,  faceDOFcount,  regionDOFcount);
+  std::cout<<" DOFcount "<<Vcount<<" "<<edgeDOFcount<<" "<<faceDOFcount<<" "<<regionDOFcount<<"\n"; 
+  
   getVertexLinks(o, n, bcs);
+  getInteriorIEN(o, n, edgeMode, faceMode, regionMode);
   getInterior(o, bcs, n);
-  
-  //getHOInterior(o, bcs, n, f);
-  
+
   
   getBoundary(o, bcs, n);
   getInterface(o, bcs, n);
