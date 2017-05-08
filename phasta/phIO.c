@@ -150,6 +150,23 @@ void ph_write_ints(FILE* f, const char* name, int* data,
   fprintf(f, "\n");
 }
 
+void ph_write_ints_ien(FILE* f, const char* name, int* data,
+    size_t n, int nparam, int* params)
+{
+  ph_write_header(f, name, n * sizeof(int) + 1, nparam, params);
+  PHASTAIO_WRITETIME(fwrite(data, sizeof(int), n, f);, (n*sizeof(int)))
+  fprintf(f, "\n");
+  /*
+  fread(data,sizeof(int),n,f);
+    FILE* pFile;
+  pFile = fopen("ien.txt","w");
+  fprintf(pFile,name);
+  fprintf(pFile,"\n");
+  for(unsigned p = 0; p<n; p++)
+	fprintf(pFile,"%d\n", data[p]);
+  */
+}
+
 static void parse_params(char* header, long* bytes,
     int* nodes, int* vars, int* step)
 {
@@ -194,4 +211,13 @@ void ph_write_field(FILE* f, const char* field, double* data,
   params[VARS_PARAM] = vars;
   params[STEP_PARAM] = step;
   ph_write_doubles(f, field, data, nodes * vars, FIELD_PARAMS, params);
+  /*
+    fread(data,sizeof(double),nodes * vars,f);
+    FILE* pFile;
+  pFile = fopen("solution.txt","a+");
+  fprintf(pFile,field);
+  fprintf(pFile,"\n");
+  for(int p = 0; p<nodes * vars; p++)
+	 fprintf(pFile,"%f\n", data[p]);
+	 */
 }

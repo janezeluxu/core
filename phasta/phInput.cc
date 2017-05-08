@@ -13,7 +13,7 @@ namespace ph {
 
 static void setDefaults(Input& in)
 {
-  in.GlobalP = 1;
+  in.globalP =0;
   in.timeStepNumber = 0;
   in.ensa_dof = 0;
   in.ensa_melas_dof = 0; 
@@ -84,10 +84,9 @@ typedef std::map<std::string, double*> DblMap;
 
 static void formMaps(Input& in, StringMap& stringMap, IntMap& intMap, DblMap& dblMap)
 {
+  intMap["globalP"] = &in.globalP;
   intMap["timeStepNumber"] = &in.timeStepNumber;
   intMap["ensa_dof"] = &in.ensa_dof;
-  intMap["GlobalP"] = &in.GlobalP;
-  
   intMap["ensa_melas_dof"] = &in.ensa_melas_dof;
   stringMap["restartFileName"] = &in.restartFileName;
   stringMap["attributeFileName"] = &in.attributeFileName;

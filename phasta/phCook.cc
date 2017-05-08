@@ -23,6 +23,8 @@
 #include <apf.h>
 #include <gmi_mesh.h>
 #include <PCU.h>
+#include	<apfNumbering.h>
+#include	<apfShape.h>
 #include <pcu_io.h>
 #include <pcu_util.h>
 #include <string>
@@ -236,6 +238,42 @@ namespace ph {
       ph::buildMapping(m);
     preprocess(m,in,out,bcs);
   }
+  /*
+  void postprocess(apf::Mesh2* m, Output& o) {
+	apf::changeMeshShape(m,apf::getLagrange(2));
+	apf::MeshIterator* it = m->begin(1);
+	apf::MeshEntity* e;
+	
+    apf::Field* ienbcfield = apf::createFieldOn(m,"ienBC",apf::VECTOR); 
+	apf::Numbering* n = apf::numberOverlapNodes(m, "ph_local");  
+    apf::Vector3 value;
+	 it = m->begin(0);
+	int count = 0;
+	//apf::Downward v;
+	
+	while ((e=m->iterate(it))){
+		value[0] = apf::getNumber(n, e, 0, 0);
+		value[1] = o.arrays.nbc[count];
+		value[2] = o.arrays.ibc[int(value[1])-1];
+		apf::setVector(ienbcfield,e,0,value);
+		count++;
+	}
+	m->end(it);
+	
+	it = m->begin(1);
+	while ((e = m->iterate(it))) {
+		value[0] = count;
+		value[1] = o.arrays.nbc[count];
+		value[2] = o.arrays.ibc[int(value[1])-1];
+		 //ntf("count = %d, edgeMode %f, nbc = %f!\n", count, value[0], value[1]);
+		apf::setVector(ienbcfield,e,0,value);
+		count++;
+	}
+	m->end(it);
+    apf::writeVtkFiles("QuadraticTet",m);
+    apf::destroyField(ienbcfield);
+  }
+  */
 }
 
 namespace chef {
@@ -254,6 +292,7 @@ namespace chef {
       m = repeatMdsMesh(m, g, plan, in.splitFactor);
     ph::checkBalance(m,in);
     ph::preprocess(m,in,out,bcs);
+    //ph::postprocess(m,out);
   }
   void cook(gmi_model*& g, apf::Mesh2*& m) {
     ph::Input in;

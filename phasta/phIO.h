@@ -13,6 +13,8 @@ void ph_write_doubles(FILE* f, const char* name, double* data,
 void ph_write_ints(FILE* f, const char* name, int* data,
     size_t n, int nparam, int* params);
 
+void ph_write_ints_ien(FILE* f, const char* name, int* data,
+    size_t n, int nparam, int* params);
 /**
  * @brief determines if bytes read from the need to be 
  *        swapped to account for endianness

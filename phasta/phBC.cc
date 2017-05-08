@@ -12,7 +12,7 @@
 #include <cstring>
 #include <gmi.h>
 #include <pcu_util.h>
-
+#include <iostream>
 namespace ph {
 
 bool BC::operator<(const BC& other) const
@@ -335,12 +335,15 @@ bool applyEssentialBCs(gmi_model* gm, gmi_ent* ge,
 {
   bool didSimple = applyBCs(gm, ge, appliedBCs, x, essentialBCs,
       sizeof(essentialBCs) / sizeof(KnownBC), values, bits);
+  std::cout<<" value afte sim"<<values[1]<<" "<<values[2]<<" "<<values[3]<<" "<<values[4]<<" "<<values[5]<<" "<<values[6]<<" "<<values[7]<<" "<<values[8]<<" "<<values[9]<<" bits "<<bits[0]<<"\n";
   /* the complexity of velocity constraints is delegated to
      the code in phConstraint.cc */
   bool didVelocity = applyVelocityConstaints(gm, appliedBCs,
       ge, x, values, bits);
+  std::cout<<" value after velocity"<<values[1]<<" "<<values[2]<<" "<<values[3]<<" "<<values[4]<<" "<<values[5]<<" "<<values[6]<<" "<<values[7]<<" "<<values[8]<<" "<<values[9]<<" bits "<<bits[0]<<"\n";
   bool didElastic = applyElasticConstaints(gm, appliedBCs,
       ge, x, values, bits);
+  //std::cout<<" value after elas"<<values[1]<<" "<<values[2]<<" "<<values[3]<<" "<<values[4]<<" "<<values[5]<<" "<<values[6]<<" bits "<<bits[0]<<"\n";
   return didSimple || didVelocity || didElastic;
 }
 

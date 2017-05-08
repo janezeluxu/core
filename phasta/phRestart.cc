@@ -11,6 +11,8 @@
 #include <sstream>
 #include <pcu_util.h>
 #include <cstring>
+#include <iostream>
+#include <stdio.h>
 #ifdef HAVE_SIMMETRIX
 #include <apfSIM.h>
 #endif
@@ -211,14 +213,19 @@ void attachField(
 
 void detachField(
     apf::Field* f,
+    Input& in,
+    Output& out,
     double*& data,
     int& size)
 {
   apf::Mesh* m = apf::getMesh(f);
   size = apf::countComponents(f);
-  size_t n = m->count(0);
+  int p = in.globalP;
+  size_t n = out.nOverlapNodes;
   apf::NewArray<double> c(size);
-  data = (double*)malloc(sizeof(double) * size * m->count(0));
+  apf::NewArray<double> c1(size);
+  int TotalDOF = out.nOverlapNodes;
+  data = (double*)malloc(sizeof(double) * size * TotalDOF);
   apf::MeshEntity* e;
   size_t i = 0;
   apf::MeshIterator* it = m->begin(0);
@@ -229,19 +236,42 @@ void detachField(
     ++i;
   }
   m->end(it);
+  
+	apf::MeshIterator* ite = m->begin(1);
+	while ((e = m->iterate(ite))) {
+		  apf::Downward bv;
+		 m->getDownward(e, 0, bv);
+		BlockKey k;
+		getInteriorBlockKey(m, e, k,p);
+		int edgeMode = k.edgeModeN;
+        //std::cout<<" nvertex "<<nvertex<<"\n"; 
+	    if (edgeMode>0){
+			apf::getComponents(f, bv[0], 0, &c[0]);
+			apf::getComponents(f, bv[1], 0, &c1[0]);
+		for (int j = 0; j < size; ++j)
+		{
+			data[j * n + i] = 0.5*(c[j]+c1[j]);
+			//std::cout<<" data "<<data[j * n + i]<<"\n"; 
+		}
+	    ++i;
+		}
+	}
+  m->end(ite);
   PCU_ALWAYS_ASSERT(i == n);
   apf::destroyField(f);
 }
 
 void detachField(
     apf::Mesh* m,
+    Input& in,
+    Output& out,
     const char* fieldname,
     double*& data,
     int& size)
 {
   apf::Field* f = m->findField(fieldname);
   PCU_ALWAYS_ASSERT(f);
-  detachField(f, data, size);
+  detachField(f,in, out, data, size);
 }
 
 static bool isNodalField(const char* fieldname, int nnodes, apf::Mesh* m)
@@ -330,14 +360,16 @@ int readAndAttachField(
 
 void detachAndWriteField(
     Input& in,
+    Output& out,
     apf::Mesh* m,
     FILE* f,
     const char* fieldname)
 {
   double* data;
   int size;
-  detachField(m, fieldname, data, size);
-  ph_write_field(f, fieldname, data, m->count(0), size, in.timeStepNumber);
+  detachField(m, in, out, fieldname, data, size);
+  int TotalDOF = out.nOverlapNodes;
+  ph_write_field(f, fieldname, data, TotalDOF, size, in.timeStepNumber);
   free(data);
 }
 
@@ -437,18 +469,18 @@ void detachAndWriteSolution(Input& in, Output& out, apf::Mesh* m, std::string pa
   if (errField)
     apf::destroyField(errField);
   if (m->findField("solution"))
-    detachAndWriteField(in, m, f, "solution");
+    detachAndWriteField(in, out,  m, f, "solution");
   if (m->findField("time derivative of solution"))
-    detachAndWriteField(in, m, f, "time derivative of solution");
+    detachAndWriteField(in, out, m, f, "time derivative of solution");
   if (m->findField("mesh_vel"))
-    detachAndWriteField(in, m, f, "mesh_vel");
+    detachAndWriteField(in, out, m, f, "mesh_vel");
   if (in.displacementMigration)
-    detachAndWriteField(in, m, f, "displacement");
+    detachAndWriteField(in, out,  m, f, "displacement");
   if (in.dwalMigration)
-    detachAndWriteField(in, m, f, "dwal");
+    detachAndWriteField(in, out, m, f, "dwal");
   if (in.buildMapping) {
-    detachAndWriteField(in, m, f, "mapping_partid");
-    detachAndWriteField(in, m, f, "mapping_vtxid");
+    detachAndWriteField(in, out, m, f, "mapping_partid");
+    detachAndWriteField(in, out, m, f, "mapping_vtxid");
   }
   /* destroy any remaining fields */
   while(m->countFields())

@@ -5,7 +5,14 @@
 #include <sstream>
 #include <pcu_util.h>
 #include <cstdlib>
-#include <iostream>
+
+#include	<apf.h>
+#include	<gmi_mesh.h>
+#include	<apfMDS.h>
+#include	<apfMesh2.h>
+#include	<PCU.h>
+#include	<apfNumbering.h>
+#include	<apfShape.h>
 namespace ph {
 
 static std::string buildGeomBCFileName(std::string timestep_or_dat)
@@ -23,47 +30,20 @@ enum {
 void getInteriorConnectivity(Output& o, int block, apf::DynamicArray<int>& c)
 {
   int nelem = o.blocks.interior.nElements[block];
-  int nvert = o.blocks.interior.keys[block].nElementVertices;
-  c.setSize(nelem * nvert);
+  //int nvert = o.blocks.interior.keys[block].nElementVertices;
+  int totalDOF = o.blocks.interior.keys[block].nElementDOF;
+  c.setSize(nelem * totalDOF);
   size_t i = 0;
-  for (int vert = 0; vert < nvert; ++vert)
+  for (int vert = 0; vert < totalDOF; ++vert)
     for (int elem = 0; elem < nelem; ++elem)
       c[i++] = o.arrays.ien[block][elem][vert] + 1; /* FORTRAN indexing */
   PCU_ALWAYS_ASSERT(i == c.getSize());
 }
 
-
-void getInteriorOrder(Output& o, int block, apf::DynamicArray<int>& c)
-{
-  int nelem = o.blocks.interior.nElements[block];
-  //int nvert = o.blocks.interior.keys[block].nElementVertices;
-  int totalDOF = o.blocks.interior.keys[block].nElementDOF;
-  c.setSize(nelem * totalDOF);
-  size_t i = 0;
-  for (int vert = 0; vert < totalDOF; ++vert)
-    for (int elem = 0; elem < nelem; ++elem)
-      c[i++] = o.arrays.ienp[block][elem][vert] + 1; /* FORTRAN indexing */
-  PCU_ALWAYS_ASSERT(i == c.getSize());
-}
-
-void getInteriorSolution(Output& o, int block, apf::DynamicArray<int>& c)
-{
-  int nelem = o.blocks.interior.nElements[block];
-  //int nvert = o.blocks.interior.keys[block].nElementVertices;
-  int totalDOF = o.blocks.interior.keys[block].nElementDOF;
-  c.setSize(nelem * totalDOF);
-  size_t i = 0;
-  for (int vert = 0; vert < totalDOF; ++vert)
-    for (int elem = 0; elem < nelem; ++elem)
-      c[i++] = o.arrays.ienSolution[block][elem][vert] + 1; 
-  PCU_ALWAYS_ASSERT(i == c.getSize());
-}
-
-
 void getBoundaryConnectivity(Output& o, int block, apf::DynamicArray<int>& c)
 {
   int nelem = o.blocks.boundary.nElements[block];
-  int nvert = o.blocks.boundary.keys[block].nElementVertices;
+  int nvert = o.blocks.boundary.keys[block].nElementDOF;
   c.setSize(nelem * nvert);
   size_t i = 0;
   for (int vert = 0; vert < nvert; ++vert)
@@ -179,17 +159,7 @@ void fillBlockKeyParams(int* params, BlockKey& k)
 {
   params[1] = k.nElementVertices;
   params[2] = k.polynomialOrder;
-  params[3] = k.nElementVertices; /* num nodes */
-  params[4] = k.nBoundaryFaceEdges; /* num boundary nodes */
-  params[5] = k.nBoundaryFaceEdges;
-  params[6] = k.elementType;
-}
-
-void fillBlockKeySolutionParams(int* params, BlockKey& k)
-{
-  params[1] = k.nElementDOF;
-  params[2] = k.polynomialOrder;
-  params[3] = k.nElementVertices; /* num nodes */
+  params[3] = k.nElementDOF; /* num nodes */
   params[4] = k.nBoundaryFaceEdges; /* num boundary nodes */
   params[5] = k.nBoundaryFaceEdges;
   params[6] = k.elementType;
@@ -222,24 +192,13 @@ void writeBlocks(FILE* f, Output& o)
     fillBlockKeyParams(params, k);
     getInteriorConnectivity(o, i, c);
     ph_write_ints(f, phrase.c_str(), &c[0], c.getSize(), 7, params);
-    
-    fillBlockKeySolutionParams(params, k);
-    phrase = "interior order"; 
-    getInteriorOrder(o, i, c);
-    ph_write_ints(f, phrase.c_str(), &c[0], c.getSize(), 7, params);
-    std::cout<<" orderPhrase "<<phrase.c_str()<<params[0]<<"\n"; 
-    
-    phrase = "interior Solution"; 
-    getInteriorSolution(o, i, c);
-    ph_write_ints(f, phrase.c_str(), &c[0], c.getSize(), 7, params);
-    std::cout<<"Phrase "<<phrase.c_str()<<"\n"; 
-    
     if (o.arrays.mattype) {
       phrase = getBlockKeyPhrase(k, "material type interior ");
       getInteriorMaterialType(o, i, c);
       ph_write_ints(f, phrase.c_str(), &c[0], c.getSize(), 1, params); 
     }
   }
+  
   for (int i = 0; i < o.blocks.boundary.getSize(); ++i) {
     BlockKey& k = o.blocks.boundary.keys[i];
     std::string phrase = getBlockKeyPhrase(k, "connectivity boundary ");
@@ -253,6 +212,7 @@ void writeBlocks(FILE* f, Output& o)
       getBoundaryMaterialType(o, i, c);
       ph_write_ints(f, phrase.c_str(), &c[0], c.getSize(), 1, params); 
     }
+    
     phrase = getBlockKeyPhrase(k, "nbc codes ");
     apf::DynamicArray<int> codes;
     getNaturalBCCodes(o, i, codes);
@@ -261,7 +221,9 @@ void writeBlocks(FILE* f, Output& o)
     apf::DynamicArray<double> values;
     getNaturalBCValues(o, i, values);
     ph_write_doubles(f, phrase.c_str(), &values[0], values.getSize(), 8, params);
+    
   }
+  /*
   for (int i = 0; i < o.blocks.interface.getSize(); ++i) {
     BlockKeyInterface& k = o.blocks.interface.keys[i];
     std::string phrase = getBlockKeyPhraseInterface(k, "connectivity interface ");
@@ -276,6 +238,7 @@ void writeBlocks(FILE* f, Output& o)
       ph_write_ints(f, phrase.c_str(), &c[0], c.getSize(), 2, params); 
     }
   }
+  */
 
 }
 
@@ -289,9 +252,37 @@ static void writeInts(FILE* f, const char* name, int* i, int n)
   ph_write_ints(f, name, i, n, 1, &n);
 }
 
+/*
+static void writeInts_nbc(FILE* f, const char* name, int* i, int n)
+{
+  ph_write_ints(f, name, i, n, 1, &n);
+  
+        fread(i,sizeof(int),n,f);
+    FILE* pFile;
+  pFile = fopen("nbc.txt","w");
+  fprintf(pFile,name);
+  fprintf(pFile,"\n");
+  for(int p = 0; p<n; p++)
+	fprintf(pFile,"%d\n", i[p]);
+}
+
+static void writeInts_ibc(FILE* f, const char* name, int* i, int n)
+{
+  ph_write_ints(f, name, i, n, 1, &n);
+  
+        fread(i,sizeof(int),n,f);
+    FILE* pFile;
+  pFile = fopen("ibc.txt","w");
+  fprintf(pFile,name);
+  fprintf(pFile,"\n");
+  for(int p = 0; p<n; p++)
+	fprintf(pFile,"%d\n", i[p]);
+}
+*/
 static void writeDoubles(FILE* f, const char* name, double* d, int n)
 {
   ph_write_doubles(f, name, d, n, 1, &n);
+
 }
 
 static void writeElementGraph(Output& o, FILE* f)
@@ -320,17 +311,15 @@ static void writeEdges(Output& o, FILE* f)
   }
 }
 
-static void writeBoundaryLayer(Output& o, FILE* f)
+static void writeGrowthCurves(Output& o, FILE* f)
 {
-  o.nGrowthCurves = 0;         // JUST FOR NOW. Need data from generateOutput
-  o.nLayeredMeshVertices = 0;  // JUST FOR NOW. Need data from generateOutput
   if (o.nGrowthCurves > 0) {
     writeInt(f, "number of growth curves", o.nGrowthCurves);
-    writeInt(f, "number of layered mesh vertices", o.nGrowthCurves);
-    writeDoubles(f, "first layer thickness", o.arrays.blflt, o.nGrowthCurves);
-    writeDoubles(f, "growth ratio", o.arrays.blgr, o.nGrowthCurves);
-    writeInts(f, "total number of vertices", o.arrays.bltnv, o.nGrowthCurves);
-    writeInts(f, "growth curve connectivity", o.arrays.bllist, o.nLayeredMeshVertices);
+    writeInt(f, "number of layered mesh vertices", o.nLayeredMeshVertices);
+    writeDoubles(f, "first layer thickness", o.arrays.gcflt, o.nGrowthCurves);
+    writeDoubles(f, "growth ratio", o.arrays.gcgr, o.nGrowthCurves);
+    writeInts(f, "number of vertices on growth curve", o.arrays.igcnv, o.nGrowthCurves);
+    writeInts(f, "list of vertices on growth curve", o.arrays.igclvid, o.nLayeredMeshVertices);
   }
 }
 
@@ -377,29 +366,30 @@ void writeGeomBC(Output& o, std::string path, int timestep)
   ph_write_doubles(f, "co-ordinates", o.arrays.coordinates,
       params[0] * params[1], 2, params);
   writeInt(f, "number of processors", PCU_Comm_Peers());
-  writeInt(f, "size of ilwork array", o.nlwork);
-  if (o.nlwork)
-    writeInts(f, "ilwork ", o.arrays.ilwork, o.nlwork);
+  //writeInt(f, "size of ilwork array", o.nlwork);
+  //if (o.nlwork)
+    //writeInts(f, "ilwork ", o.arrays.ilwork, o.nlwork);
   params[0] = m->count(0);
-  writeInts(f, " mode number map from partition to global",
-      o.arrays.globalNodeNumbers, m->count(0));
-      
-  std::cout<<"before writeBlocks"<<"\n";   
+  //writeInts(f, " mode number map from partition to global",
+    //  o.arrays.globalNodeNumbers, m->count(0));
   writeBlocks(f, o);
-  std::cout<<"after writeBlocks"<<"\n";  
-  writeInts(f, "bc mapping array", o.arrays.nbc, m->count(0));
+  writeInts(f, "bc mapping array", o.arrays.nbc, o.nOverlapNodes);
   writeInts(f, "bc codes array", o.arrays.ibc, o.nEssentialBCNodes);
   apf::DynamicArray<double> bc;
   getEssentialBCValues(o, bc);
   writeDoubles(f, "boundary condition array", &bc[0], bc.getSize());
-  writeInts(f, "periodic masters array", o.arrays.iper, m->count(0));
+  writeInts(f, "periodic masters array", o.arrays.iper, o.nOverlapNodes);
+  printf("nEssentialBCNodes %d!\n", o.nEssentialBCNodes);
+  //writeASCII_bc(f, "boundary condition array", &bc[0], bc.getSize());
   writeElementGraph(o, f);
   writeEdges(o, f);
-  writeBoundaryLayer(o, f);
+  writeGrowthCurves(o, f);
   PHASTAIO_CLOSETIME(fclose(f);)
   double t1 = PCU_Time();
   if (!PCU_Comm_Self())
     printf("geombc file written in %f seconds\n", t1 - t0);
-}
+    //for (int i = 0; i<o.nOverlapNodes; i++)
+		//printf("i = %d, ibc %d!\n", i, o.arrays.ibc[i]);
+	}
 
 }

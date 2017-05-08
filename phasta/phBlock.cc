@@ -49,8 +49,6 @@ static void insertKey(Blocks& b, BlockKey const& k)
     b.keyToIndex[k] = idx;
     b.nElements[idx] = 1;
     b.keys[idx] = k;
-    b.nElementNodes[idx] = k.nElementVertices;
-    b.nElementNodes[idx] = k.nElementDOF;
   }
 }
 
@@ -68,7 +66,6 @@ static void insertKeyInterface
     b.keyToIndex[k] = idx;
     b.nElements[idx] = 1;
     b.keys[idx] = k;
-    b.nElementNodes[idx] = k.nElementVertices;
   }
 }
 
@@ -77,21 +74,23 @@ static void getBlockKeyCommon(apf::Mesh* m, apf::MeshEntity* e, BlockKey& k, int
   k.elementType = getPhastaType(m, e);
   k.nElementVertices =
     apf::Mesh::adjacentCount[m->getType(e)][0];
-  //int  p = 2;
   k.polynomialOrder = p;
   int nv = apf::Mesh::adjacentCount[m->getType(e)][0];
   int NodeNumE = apf::Mesh::adjacentCount[m->getType(e)][1];
   int NodeNumF = apf::Mesh::adjacentCount[m->getType(e)][2];
+  
   int edgeMode = p-1;
   int faceMode = 0.5*(p-1)*(p-2);
   int regionMode = (1/3)*(p-1)*(p-2)*(p-3);
+  k.edgeModeN = edgeMode;
+  k.faceModeN = faceMode;
+  k.regionModeN = regionMode;
   k.nElementDOF = nv+NodeNumE*edgeMode+NodeNumF*faceMode+regionMode;
 }
 
 void getInteriorBlockKey(apf::Mesh* m, apf::MeshEntity* e, BlockKey& k, int p)
 {
-  //int p = 2;
-  getBlockKeyCommon(m, e, k,p);
+  getBlockKeyCommon(m, e, k, p);
   /* what this value is should not matter much for interior elements */
   k.nBoundaryFaceEdges = k.elementType == HEXAHEDRON ? 4 : 3;
 }
@@ -120,15 +119,15 @@ static void applyTriQuadHack(BlockKey& k)
 }
 
 void getBoundaryBlockKey(apf::Mesh* m, apf::MeshEntity* e,
-    apf::MeshEntity* f, BlockKey& k)
+    apf::MeshEntity* f, BlockKey& k, int p)
 {
-  getBlockKeyCommon(m, e, k,1);
+  getBlockKeyCommon(m, e, k,p);
   k.nBoundaryFaceEdges =
     apf::Mesh::adjacentCount[m->getType(f)][1];
   applyTriQuadHack(k);
 }
 
-void getBoundaryBlocks(apf::Mesh* m, Blocks& b)
+void getBoundaryBlocks(apf::Mesh* m, Blocks& b, int p)
 {
   int boundaryDim = m->getDimension() - 1;
   apf::MeshIterator* it = m->begin(boundaryDim);
@@ -145,7 +144,7 @@ void getBoundaryBlocks(apf::Mesh* m, Blocks& b)
       continue;
     apf::MeshEntity* e = m->getUpward(f, 0);
     BlockKey k;
-    getBoundaryBlockKey(m, e, f, k);
+    getBoundaryBlockKey(m, e, f, k, p);
     insertKey(b, k);
   }
   m->end(it);
@@ -223,10 +222,10 @@ void getInterfaceBlocks(apf::Mesh* m, BCs& bcs, BlocksInterface& b)
   m->end(it);
 }
 
-void getAllBlocks(apf::Mesh* m, BCs& bcs, AllBlocks& b,int p)
+void getAllBlocks(apf::Mesh* m, BCs& bcs, AllBlocks& b, int p)
 {
-  getInteriorBlocks(m, b.interior,p);
-  getBoundaryBlocks(m, b.boundary);
+  getInteriorBlocks(m, b.interior, p);
+  getBoundaryBlocks(m, b.boundary, p);
   getInterfaceBlocks(m, bcs, b.interface);
 }
 

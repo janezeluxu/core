@@ -5,10 +5,18 @@
 #include "phBubble.h"
 #include "phAxisymmetry.h"
 #include "phInterfaceCutter.h"
+#include "apfSIM.h"
+#include "gmi_sim.h"
+#include <SimUtil.h>
+#include <SimPartitionedMesh.h>
+#include <SimAdvMeshing.h>
 #include <fstream>
 #include <sstream>
 #include <cassert>
 #include <iostream>
+#include <stdio.h>
+#include <stdlib.h>
+#include <typeinfo>
 #include <pcu_util.h>
 
 namespace ph {
@@ -69,17 +77,12 @@ static void getVertexLinks(Output& o, apf::Numbering* n, BCs& bcs)
   encodeILWORK(n, links, o.nlwork, o.arrays.ilwork);
 }
 
-static void createEdgeDOF(Output& o, apf::MeshTag* tags, int edgeMode, int& Vcount, int& edgeDOFcount)
+
+static void createEdgeDOF(Output& o, apf::MeshTag* tags, int Vcount, int edgeMode, int& edgeDOFcount)
 {
 	
 	apf::Mesh* m = o.mesh;
 	apf::MeshEntity* e;
-	apf::MeshEntity* v;
-	//loop through all vertex, get the total vertex number
-	apf::MeshIterator* itv = m->begin(0);
-	while ((v = m->iterate(itv))) {
-		Vcount = Vcount+1;
-	}
 	
 	//loop through all edge, tag edge DOF
 	apf::MeshIterator* it = m->begin(1);
@@ -132,52 +135,54 @@ static void createRegionDOF(Output& o, apf::MeshTag* tags, int regionMode, int f
 	}
 }
 
-static void TagAllDOF(Output& o, int edgeMode, int faceMode, int regionMode, int& Vcount, int& edgeDOFcount, int& faceDOFcount, int& regionDOFcount)
+static void TagAllDOF(Output& o, int edgeMode, int faceMode, int regionMode, int Vcount, int& edgeDOFcount, int& faceDOFcount, int& regionDOFcount)
 {   
 	  apf::MeshTag* edgetags = o.mesh->createIntTag("edgeDOF",edgeMode);
 	  apf::MeshTag* facetags = o.mesh->createIntTag("faceDOF",faceMode);
 	  apf::MeshTag* regiontags = o.mesh->createIntTag("RegionDOF",regionMode);
-	if (edgeMode>0){
-    createEdgeDOF(o, edgetags,edgeMode,Vcount,edgeDOFcount);
-	}
-  if (faceMode>0){
+    createEdgeDOF(o, edgetags,Vcount, edgeMode, edgeDOFcount);
 	createFaceDOF(o,facetags,faceMode,edgeDOFcount,faceDOFcount);
-	}
-  if (regionMode>0){
 	createRegionDOF(o,regiontags,regionMode,faceDOFcount,regionDOFcount);
-	}
 }
 
 
-static void getInteriorIEN(Output& o, apf::Numbering* n, int edgeMode, int faceMode, int regionMode)
+static void getInterior(Output& o, BCs& bcs, apf::Numbering* n)
 {
   apf::Mesh* m = o.mesh;
   Blocks& bs = o.blocks.interior;
+  int p = o.in->globalP;
   int*** ien     = new int**[bs.getSize()];
-  int*** ienp     = new int**[bs.getSize()];
+  int**  mattype = 0;
+  if (bcs.fields.count("material type"))
+    mattype = new int* [bs.getSize()];
   apf::NewArray<int> js(bs.getSize());
   for (int i = 0; i < bs.getSize(); ++i) {
     ien    [i] = new int*[bs.nElements[i]];
-    ienp    [i] = new int*[bs.nElements[i]];
+    if (mattype)
+      mattype[i] = new int [bs.nElements[i]];
     js[i] = 0;
   }
-  
   apf::MeshTag* edgetag = m->findTag("edgeDOF");
   apf::MeshTag* facetag = m->findTag("faceDOF");
   apf::MeshTag* regiontag = m->findTag("RegionDOF");
   
-  int* tageedgeTemp = new int[edgeMode];
-  int* tagfaceTemp = new int[faceMode];  
-  int* tagregionTemp = new int[regionMode];  
-  int p = edgeMode+1;
-  //gmi_model* gm = m->getModel();
+  gmi_model* gm = m->getModel();
   apf::MeshEntity* e;
   apf::MeshIterator* it = m->begin(m->getDimension());
-  int eleN = 0;
   while ((e = m->iterate(it))) {
     BlockKey k;
-    getInteriorBlockKey(m, e, k,2);
+    getInteriorBlockKey(m, e, k,p);
     int nv = k.nElementVertices;
+    int EtotalDOF = k.nElementDOF;
+    int edgeMode = k.edgeModeN;
+    int faceMode = k.faceModeN;
+    int regionMode = k.regionModeN;
+    int* tageedgeTemp = new int[edgeMode];
+    int* tagfaceTemp = new int[faceMode];  
+    int* tagregionTemp = new int[regionMode]; 
+  
+    //std::cout<<" EtotalDOF "<<EtotalDOF<<" edgeModeN "<<edgeMode<<" faceMode "<<faceMode<<" regionMode "<<regionMode<<"\n"; 
+    
     PCU_ALWAYS_ASSERT(bs.keyToIndex.count(k));
     int i = bs.keyToIndex[k];
     int j = js[i];
@@ -185,34 +190,27 @@ static void getInteriorIEN(Output& o, apf::Numbering* n, int edgeMode, int faceM
 	int NodeNumE = m->getDownward(e,1,edge);
 	apf::Downward f;
 	int NodeNumF = m->getDownward(e,2,f);
-	int EtotalDOF = k.nElementDOF;
-    //std::cout<<" EtotalDOF "<<EtotalDOF<<"\n"; 
+	
     ien[i][j] = new int[EtotalDOF];
-    ienp[i][j] = new int[EtotalDOF];
-    eleN++;
     apf::Downward v;
     getVertices(m, e, v);
-    //std::cout<<" eleN "<<eleN<<"\n"; 
     int count = 0;
     for (int k = 0; k < nv; ++k)
     {
       ien[i][j][k] = apf::getNumber(n, v[k], 0, 0);
-	  ienp[i][j][k] = p;
-	  count++;
-	  //std::cout<<" count "<<count-1<<" tagtemp "<<ien[i][j][k]<<"\n"; 
+      std::cout<<" i "<<i<<" j "<<j<<" k "<<k<<" ien "<<ien[i][j][k]<<"\n"; 
+      count++;
     }
-    
-    if (edgeMode>0){
+
+	if (edgeMode>0){
 		
 		for(int edgeN = 0; edgeN<NodeNumE; edgeN++){
 			m->getIntTag(edge[edgeN],edgetag,tageedgeTemp);
 			for (int k = 0; k < edgeMode; ++k)
 			{
-				//std::cout<<" tagtemp "<<tageedgeTemp[k]<<"\n"; 
-				ien[i][j][count-1] = tageedgeTemp[k];
-				ienp[i][j][count-1] = p;
+				ien[i][j][count] = tageedgeTemp[k];
+				std::cout<<" i "<<i<<" j "<<j<<" count "<<count<<" ien "<<ien[i][j][count]<<"\n"; 
 				count++;
-				//std::cout<<" count "<<count-1<<" tagtemp "<<tageedgeTemp[k]<<"\n"; 
 			}
 		}
 	}
@@ -223,9 +221,7 @@ static void getInteriorIEN(Output& o, apf::Numbering* n, int edgeMode, int faceM
 			m->getIntTag(f[faceN],facetag,tagfaceTemp);
 			for (int k = 0; k < faceMode; ++k)
 			{
-				//std::cout<<" tagtemp "<<tageedgeTemp[k]<<"\n"; 
-				ien[i][j][count-1] = tagfaceTemp[k];
-				ienp[i][j][count-1] = p;
+				ien[i][j][count] = tagfaceTemp[k];
 				count++;
 				//std::cout<<" count "<<count-1<<" tagtemp "<<tagfaceTemp[k]<<"\n"; 
 			}
@@ -236,58 +232,10 @@ static void getInteriorIEN(Output& o, apf::Numbering* n, int edgeMode, int faceM
 		m->getIntTag(e,regiontag,tagregionTemp);   
 		for (int k = 0; k < regionMode; ++k)
 		{
-			ien[i][j][count-1] = tagregionTemp[k];
-			ienp[i][j][count-1] = p;
+			ien[i][j][count] = tagregionTemp[k];
 			count++;
 			//std::cout<<" count "<<count-1<<" tagtemp "<<tagregionTemp[k]<<"\n";
 		}
-    }
-    
-    ++js[i];
-  }
-  m->end(it);
-  
-  for (int i = 0; i < bs.getSize(); ++i)
-    PCU_ALWAYS_ASSERT(js[i] == bs.nElements[i]);
-  o.arrays.ienSolution     = ien;
-  o.arrays.ienp     = ienp;
-}
-
-static void getInterior(Output& o, BCs& bcs, apf::Numbering* n)
-{
-  apf::Mesh* m = o.mesh;
-  Blocks& bs = o.blocks.interior;
-  int*** ien     = new int**[bs.getSize()];
-  //int*** ienp     = new int**[bs.getSize()];
-  int**  mattype = 0;
-  if (bcs.fields.count("material type"))
-    mattype = new int* [bs.getSize()];
-  apf::NewArray<int> js(bs.getSize());
-  for (int i = 0; i < bs.getSize(); ++i) {
-    ien    [i] = new int*[bs.nElements[i]];
-    //ienp    [i] = new int*[bs.nElements[i]];
-    if (mattype)
-      mattype[i] = new int [bs.nElements[i]];
-    js[i] = 0;
-  }
-  gmi_model* gm = m->getModel();
-  apf::MeshEntity* e;
-  apf::MeshIterator* it = m->begin(m->getDimension());
-  while ((e = m->iterate(it))) {
-    BlockKey k;
-    getInteriorBlockKey(m, e, k,2);
-    int nv = k.nElementVertices;
-    PCU_ALWAYS_ASSERT(bs.keyToIndex.count(k));
-    int i = bs.keyToIndex[k];
-    int j = js[i];
-    ien[i][j] = new int[nv];
-    //ienp[i][j] = new int[nv];
-    apf::Downward v;
-    getVertices(m, e, v);
-    for (int k = 0; k < nv; ++k)
-    {
-      ien[i][j][k] = apf::getNumber(n, v[k], 0, 0);
-	  //ienp[i][j][k] = apf::getNumber(n, v[k], 0, 0);
     }
     /* get material type */
     if (mattype) {
@@ -306,11 +254,12 @@ static void getInterior(Output& o, BCs& bcs, apf::Numbering* n)
   for (int i = 0; i < bs.getSize(); ++i)
     PCU_ALWAYS_ASSERT(js[i] == bs.nElements[i]);
   o.arrays.ien     = ien;
-  //o.arrays.ienp     = ienp;
   o.arrays.mattype = mattype;
+  
+  
 }
 
-static void alignInterfaceVertex(apf::Mesh* m,
+static void checkBoundaryVertex(apf::Mesh* m,
   apf::MeshEntity* boundary, apf::MeshEntity** ev, int type) {
 // make sure the first n vertices are those on boundary
   apf::Downward bv;
@@ -340,7 +289,9 @@ static void getBoundary(Output& o, BCs& bcs, apf::Numbering* n)
 {
   apf::Mesh* m = o.mesh;
   gmi_model* gm = m->getModel();
+  int p = o.in->globalP;
   int nbc = countNaturalBCs(*o.in);
+  std::cout<<" nbc "<<nbc<<"\n"; 
   Blocks& bs = o.blocks.boundary;
   int*** ienb = new int**[bs.getSize()];
   int**  mattypeb = 0;
@@ -357,6 +308,8 @@ static void getBoundary(Output& o, BCs& bcs, apf::Numbering* n)
     bcb[i]      = new double*[bs.nElements[i]];
     js[i] = 0;
   }
+  
+  apf::MeshTag* edgetag = m->findTag("edgeDOF");
   int boundaryDim = m->getDimension() - 1;
   apf::MeshEntity* f;
   apf::MeshIterator* it = m->begin(boundaryDim);
@@ -372,17 +325,40 @@ static void getBoundary(Output& o, BCs& bcs, apf::Numbering* n)
       continue;
     gmi_ent* gf = (gmi_ent*)me;
     apf::MeshEntity* e = m->getUpward(f, 0);
+    apf::Downward edge;
+	int NodeNumE = m->getDownward(e,1,edge);
     BlockKey k;
-    getBoundaryBlockKey(m, e, f, k);
+    getBoundaryBlockKey(m, e, f, k,p);
     PCU_ALWAYS_ASSERT(bs.keyToIndex.count(k));
     int i = bs.keyToIndex[k];
     int j = js[i];
     int nv = k.nElementVertices;
+    int EtotalDOF = k.nElementDOF;
+    int edgeMode = k.edgeModeN;
+    int* tageedgeTemp = new int[edgeMode];
     apf::Downward v;
     getBoundaryVertices(m, e, f, v);
-    ienb[i][j] = new int[nv];
-    for (int k = 0; k < nv; ++k)
+    ienb[i][j] = new int[EtotalDOF];
+	/* assume the first face is the tri on boundary */
+	if(k.elementType == WEDGE)
+      checkBoundaryVertex(m, f, v, k.elementType);
+    int count = 0;  
+    for (int k = 0; k < nv; ++k){
       ienb[i][j][k] = apf::getNumber(n, v[k], 0, 0);
+      count++;
+    }  
+    	if (edgeMode>0){
+		
+		for(int edgeN = 0; edgeN<NodeNumE; edgeN++){
+			m->getIntTag(edge[edgeN],edgetag,tageedgeTemp);
+			for (int k = 0; k < edgeMode; ++k)
+			{
+				ienb[i][j][count] = tageedgeTemp[k];
+				//std::cout<<" i "<<i<<" j "<<j<<" count "<<count<<" tagtemp "<<ienk<<" ien "<<ien[i][j][count]<<"\n"; 
+				count++;
+			}
+		}
+	}
     bcb[i][j] = new double[nbc]();
     ibcb[i][j] = new int[2](); /* <- parens initialize to zero */
     apf::Vector3 x = apf::getLinearCentroid(m, f);
@@ -406,6 +382,23 @@ static void getBoundary(Output& o, BCs& bcs, apf::Numbering* n)
   o.arrays.mattypeb = mattypeb;
   o.arrays.ibcb = ibcb;
   o.arrays.bcb = bcb;
+  
+  for (int i = 0; i < bs.getSize(); ++i) {
+	  for (int l = 0; l<js[i]; l++)
+	  {
+		  //std::cout<<" i "<<i<<" l "<<l<<" matb "<<o.arrays.mattypeb[i][l]<<"\n"; 
+		  for (int k = 0; k < 10; ++k){
+				//std::cout<<" i "<<i<<" l "<<l<<" k "<<k<<" ienb "<<o.arrays.ienb[i][l][k]<<"\n"; 
+	  }
+		  for (int k = 0; k < nbc; ++k){
+				//std::cout<<" i "<<i<<" l "<<l<<" k "<<k<<" bcb "<<o.arrays.bcb[i][l][k]<<"\n"; 
+	  }
+		  for (int k = 0; k < 2; ++k){
+				//std::cout<<" i "<<i<<" l "<<l<<" ibcb "<<o.arrays.ibcb[i][l][k]<<"\n"; 
+	  }
+	  }
+	  
+  }
 }
 
 bool checkInterface(Output& o, BCs& bcs) {
@@ -512,8 +505,8 @@ static void getInterface
     getBoundaryVertices(m, e1, matches[0].entity, v1);
     ienif0[i][j] = new int[nv0];
     ienif1[i][j] = new int[nv1];
-    alignInterfaceVertex(m, face,              v0, k.elementType );
-    alignInterfaceVertex(m, matches[0].entity, v1, k.elementType1);
+    checkBoundaryVertex(m, face,              v0, k.elementType );
+    checkBoundaryVertex(m, matches[0].entity, v1, k.elementType1);
     for (int k = 0; k < nv0; ++k)
       ienif0[i][j][k] = apf::getNumber(n, v0[k], 0, 0);
     for (int k = 0; k < nv1; ++k)
@@ -563,6 +556,268 @@ static void getInterfaceElements(Output& o)
   o.nInterfaceElements = n;
 }
 
+static void getGrowthCurves(Output& o)
+{
+  Input& in = *o.in;
+  if (in.simmetrixMesh == 1) {
+    Sim_logOn("getGrowthCurves.log");
+    pProgress progress = Progress_new();
+    Progress_setDefaultCallback(progress);
+
+    // get simmetrix mesh
+    apf::MeshSIM* apf_msim = dynamic_cast<apf::MeshSIM*>(o.mesh);
+    pParMesh parMesh = apf_msim->getMesh();
+    pMesh mesh = PM_mesh(parMesh,0);
+
+    // get simmetrix model
+    gmi_model* gmiModel = apf_msim->getModel();
+    pGModel model = gmi_export_sim(gmiModel);
+
+//  Algorithm: Get growth curve info
+ 
+    typedef std::pair <pGEntity, pGFace> gPair_t;
+    typedef std::multimap <pGEntity, pGFace> gPairMap_t;
+    typedef std::pair <gPairMap_t::iterator, gPairMap_t::iterator> gPairMap_equalRange_t;
+
+//  Create an empty list (gEntities) for storing gEntity
+//  Create an empty multimap (gPairMap) for storing pairs gPair {KEY: gEntity, CONTENT: gFace}
+//  //gEntity is the model entity where a base mesh vertex is classified
+//  //gFace is the model face where 3D boundary layer attribute is placed
+    pPList gEntities = PList_new();
+    gPairMap_t gPairs;
+    gPairMap_t::iterator gPairIter;
+    gPair_t gPair;
+
+    pGEntity gEntity;
+    pGFace gFace;
+    pGEdge gEdge;
+    pGVertex gVertex;
+    pVertex vertex;
+
+    pPList gEdges = PList_new();
+    pPList gVertices = PList_new();
+
+//  //generate gEntities and gPairs
+//  //gEntities contains non-duplicated items
+//  //gPairs may contain duplicated items
+    PList_clear(gEntities);
+    gPairIter = gPairs.begin();
+//  FOR each model face (gFace)
+    GFIter gFIter = GM_faceIter(model);
+    while((gFace = GFIter_next(gFIter))){
+//    IF gFace has 3D boundary layer attribute
+  	  bool isBoundaryLayerFace = false;
+      VIter vIter = M_classifiedVertexIter(mesh, gFace, 1);
+      while((vertex = VIter_next(vIter))){
+        if(BL_isBaseEntity(vertex,gFace) == 1){
+          isBoundaryLayerFace = true;
+          break;
+        }
+      }
+
+      if(isBoundaryLayerFace){
+//      Add gFace to gEntities
+//  		Add gPair {gFace, gFace} to gPairs
+        PList_appUnique(gEntities,gFace);
+        gPair = std::make_pair(gFace,gFace);
+        gPairIter = gPairs.insert(gPairIter,gPair);
+
+//      FOR each model edge (gEdge) on the closure of gFace
+        gEdges = GF_edges(gFace);
+        for(int i = 0; i < PList_size(gEdges); i++){
+//  	    Add gEdge to gEntities
+//  		  Add gPair {gEdge, gFace} to gPairs
+          gEdge = (pGEdge)PList_item(gEdges,i);
+          PList_appUnique(gEntities,gEdge);
+          gPair = std::make_pair(gEdge,gFace);
+          gPairIter = gPairs.insert(gPairIter,gPair);
+
+//  	    FOR each model vertex (gVertex) on the closure of gEdge
+          gVertices = GE_vertices(gEdge);
+          for(int j = 0; j < PList_size(gVertices); j++){
+//  		    Add gVertex to gEntities
+//  			  Add gPair {gVertex, gFace} to gPairs
+  				  gVertex = (pGVertex)PList_item(gVertices,j);
+            PList_appUnique(gEntities,gVertex);
+            gPair = std::make_pair(gVertex,gFace);
+            gPairIter = gPairs.insert(gPairIter,gPair);
+    	    }
+        }
+      }
+    }
+
+  //for (int i = 0; i < PList_size(gEntities); i++){
+  //  gEntity = (pGEntity)PList_item(gEntities,i);
+  //  printf("getGrowthCurves: rank %d gEntities %d %d\n", PCU_Comm_Self(), GEN_type(gEntity), GEN_tag(gEntity));
+  //}
+
+  //std::cout << "gPairs contains:\n";
+  //for (gPairIter = gPairs.begin(); gPairIter != gPairs.end(); gPairIter++)
+  //  std::cout << GEN_type(gPairIter->first) << ", " << GEN_tag(gPairIter->first) << "; " << GEN_type(gPairIter->second) << ", " << GEN_tag(gPairIter->second) << std::endl ;
+
+//  get seeds of all growth curves
+    pPList allSeeds = PList_new();
+    pPList gFaces = PList_new();
+    gPairMap_equalRange_t gPair_equalRange;
+
+    pPList seeds = PList_new();
+    pPList blendSeeds = PList_new();
+    pEntity seed;
+    pGRegion gRegion;
+
+//  FOR each gEntity in gEntities
+    for(int i = 0; i < PList_size(gEntities); i++){
+      gEntity = (pGEntity)PList_item(gEntities,i);
+
+//    Generate a non-duplicated list (gFaces) for storing model faces associated with the key gEntity in gPairs
+      PList_clear(gFaces);
+      gPair_equalRange = gPairs.equal_range(gEntity);
+      for(gPairIter = gPair_equalRange.first; gPairIter != gPair_equalRange.second; gPairIter++){
+        gFace = gPairIter->second;
+        PList_appUnique(gFaces,gFace);
+      }
+
+//    Get mesh vertices (vertices) classified on gEntity excluding the closure
+      VIter vIter = M_classifiedVertexIter(mesh, gEntity, 0);
+
+//    FOR each vertex in vertices
+      while((vertex = VIter_next(vIter))){
+//      Create an empty list (seeds) for storing potential seed edges of vertex
+        PList_clear(seeds);
+
+//      FOR each gFace in gFaces
+        for(int j = 0; j < PList_size(gFaces); j++){
+          gFace = (pGFace)(PList_item(gFaces,j));
+//        FOR each side (faceSide) of gFace where a model region (gRegion) exists
+          for(int faceSide = 0; faceSide < 2; faceSide++){
+            if(!(gRegion = GF_region(gFace,faceSide)))
+              continue;
+
+            if(BL_isBaseEntity(vertex,gFace) == 0)
+              continue;
+
+            int hasSeed = BL_stackSeedEntity(vertex, gFace, faceSide, gRegion, &seed);
+
+            switch(hasSeed){
+              case 1:
+                //there is 1 seed edge
+              //printf("this is non-blend, base vertex id: %d\n", EN_id(vertex));
+                PList_appUnique(seeds,seed);
+                break;
+              case -1:
+                //this is a blend, there will be multiple seeds
+              //printf("this is a blend, base vertex id: %d, classification %d %d\n", EN_id(vertex), GEN_type(gEntity), GEN_tag(gEntity));
+                PList_clear(blendSeeds);
+                if(!(BL_blendSeedEdges(vertex, gFace, faceSide, gRegion, blendSeeds) == 1)){
+                  printf("unexpected BL_blendSeedEdges return value\n");
+                  exit(EXIT_FAILURE);
+                };
+                PList_appPListUnique(seeds, blendSeeds);
+                break;
+              case 0:
+                //there is no seed edge
+                break;
+              default:
+                printf("unexpected BL_stackSeedEntity return value\n");
+                exit(EXIT_FAILURE);
+    	  		}
+    	  	}
+    		}
+
+      //if(PList_size(seeds) > 1){
+      //  printf("getGrowthCurves: rank %d, gEntity %d %d, # of seeds %d\n", PCU_Comm_Self(), GEN_type(gEntity), GEN_tag(gEntity), PList_size(seeds));
+      //}
+
+        //Append seeds to allSeeds
+        PList_appPList(allSeeds,seeds);
+      }
+    }
+
+//  get info of growth curves
+//  create an empty list (allGrowthVertices) for storing growth vertices of all growth curves
+    pPList allGrowthVertices = PList_new();
+
+    int ngc = PList_size(allSeeds);
+
+    o.nGrowthCurves = ngc;
+    o.arrays.gcflt = new double[ngc];
+    o.arrays.gcgr  = new double[ngc];
+    o.arrays.igcnv = new int[ngc];
+
+    pPList growthVertices = PList_new();
+    pPList growthEdges = PList_new();
+
+//  FOR each seed in allSeeds
+    for(int i = 0; i < PList_size(allSeeds); i++){
+      seed = (pEdge)PList_item(allSeeds,i);
+
+      PList_clear(growthVertices);
+      PList_clear(growthEdges);
+
+//    get growth vertices (growthVertices) and edges for seed
+      if(!(BL_growthVerticesAndEdges((pEdge)seed, growthVertices, growthEdges) == 1)){
+        printf("unexpected BL_growthVerticesAndEdges return value\n");
+        exit(EXIT_FAILURE);
+      }
+
+//    append growthVertices to allGrowthVertices
+      PList_appPList(allGrowthVertices, growthVertices);
+
+      o.arrays.igcnv[i] = PList_size(growthVertices);
+
+      double l0 = E_length((pEdge)PList_item(growthEdges,0));
+      o.arrays.gcflt[i] = l0;
+
+      if( PList_size(growthEdges) > 1 )
+        o.arrays.gcgr[i] = E_length((pEdge)PList_item(growthEdges,1))/l0;
+      else
+        o.arrays.gcgr[i] = 1.0;
+    }
+
+//  get info growth curves
+    int nv = PList_size(allGrowthVertices);
+
+    o.nLayeredMeshVertices = nv;
+    o.arrays.igclv = new apf::MeshEntity*[nv];
+
+    for(int i = 0; i < PList_size(allGrowthVertices); i++){
+      vertex = (pVertex)PList_item(allGrowthVertices,i);
+
+      apf::MeshEntity* me = reinterpret_cast<apf::MeshEntity*> (vertex);
+      o.arrays.igclv[i] = me;
+    }
+
+    printf("getGrowthCurves: rank %d, ngc, nv: %d, %d\n", PCU_Comm_Self(), ngc, nv);
+
+    PCU_Add_Ints(&ngc,sizeof(ngc));
+    PCU_Add_Ints(&nv,sizeof(nv));
+
+    if(PCU_Comm_Self() == 0)
+      printf("getGrowthCurves: total ngc, nv: %d, %d\n", ngc, nv);
+
+    PList_delete(gEdges);
+    PList_delete(gVertices);
+    PList_delete(gEntities);
+    PList_delete(gFaces);
+    PList_delete(seeds);
+    PList_delete(allSeeds);
+    PList_delete(blendSeeds);
+    PList_delete(growthVertices);
+    PList_delete(growthEdges);
+    PList_delete(allGrowthVertices);
+
+    //clean up utility
+    Progress_delete(progress);
+    Sim_logOff();
+  }
+  else {
+    printf("wrong! getGrowthCurves: not implemented for non-simmetrix mesh");
+    o.nGrowthCurves = 0;
+    o.nLayeredMeshVertices = 0;
+  }
+  return;
+}
+
 static void getMaxElementNodes(Output& o)
 {
   int n = 0;
@@ -597,7 +852,9 @@ static apf::MeshEntity* getLocalPeriodicMaster(apf::MatchedSharing* sh,
 static void getLocalPeriodicMasters(Output& o, apf::Numbering* n, BCs& bcs)
 {
   apf::Mesh* m = o.mesh;
-  int* iper = new int[m->count(0)];
+  int p = o.in->globalP;
+  int edgeMode = p-1;
+  int* iper = new int[o.nOverlapNodes];
   apf::MeshIterator* it = m->begin(0);
   apf::MeshEntity* e;
   apf::MatchedSharing* sh = m->hasMatching() ? new apf::MatchedSharing(m) : 0;
@@ -613,6 +870,27 @@ static void getLocalPeriodicMasters(Output& o, apf::Numbering* n, BCs& bcs)
     ++i;
   }
   m->end(it);
+  
+  if (edgeMode>0){
+  apf::MeshIterator* ite = m->begin(1);
+  apf::MeshEntity* edge;
+  sh = m->hasMatching() ? new apf::MatchedSharing(m) : 0;
+  while ((edge = m->iterate(ite))) {
+    apf::ModelEntity* me = m->toModel(edge);
+    bool isDG = ph::isInterface(m->getModel(),(gmi_ent*) me,bcs.fields["DG interface"]);
+    apf::MeshEntity* master = getLocalPeriodicMaster(sh, edge);
+    if (master == edge || isDG)
+      iper[i] = 0;
+    else
+		iper[i] = 0;
+    ++i;
+  }
+  m->end(ite);
+}
+
+for (int j = 0;  j< i; ++j){
+	std::cout<<" j "<<j<<" iper "<<iper[j]<<"\n"; 
+}
   o.arrays.iper = iper;
   delete sh;
 }
@@ -628,17 +906,70 @@ static bool isMatchingSlave(apf::MatchedSharing* ms, apf::MeshEntity* v)
   return !ms->isOwned(v);
 }
 
+
+static void getCoordinate(apf::Mesh* m, apf::MeshEntity* e, int dimention, int node, int edgeModes, apf::Vector3& point)
+{
+	if (dimention ==1)
+	{
+		//its an edge entity, get the vertex on the 2 ends
+		apf::Downward v;
+		int nv = m->getDownward(e, 0, v);
+		std::vector<apf::Vector3> p;
+		for (int i = 0; i<nv; i++)
+		{
+			apf::Vector3 x;
+			m->getPoint(v[i], 0, x);
+			p.push_back(x);
+		}
+		//std::cout<<" node "<<node<<" point1 "<<p[0][0]<<" "<<p[0][1]<<" "<<p[0][2]<<"\n"; 
+		//std::cout<<" point2 "<<p[1][0]<<" "<<p[1][1]<<" "<<p[1][2]<<"\n"; 
+		/*
+		double dx = p[1][0]-p[0][0];
+		double dy = p[1][1]-p[0][1];
+		double dz = p[1][2]-p[0][2];
+		point[0] = p[0][0]+(dx/(edgeModes+1))*(node+1);
+		point[1] = p[0][1]+(dy/(edgeModes+1))*(node+1);
+		point[2] = p[0][2]+(dz/(edgeModes+1))*(node+1);
+		*/
+		point[0] = 0.5*(p[0][0]+p[1][0]);
+		point[1] = 0.5*(p[0][1]+p[1][1]);
+		point[2] = 0.5*(p[0][2]+p[1][2]);
+		//std::cout<<" point2 "<<point[0]<<" "<<point[1]<<" "<<point[2]<<"\n"; 
+	}
+	if (dimention ==2)
+	{
+		//its an face entity, get the vertex coordinate **need to modify
+		apf::Downward v;
+		int nv = m->getDownward(e, 0, v);
+		std::vector<apf::Vector3> p;
+		for (int i = 0; i<nv; i++)
+		{
+			apf::Vector3 x;
+			m->getPoint(v[i], 0, x);
+			p.push_back(x);
+		}
+		double dx = p[1][0]-p[0][0];
+		double dy = p[1][1]-p[0][1];
+		double dz = p[1][2]-p[0][2];
+		point[0] = p[0][0]+(dx/edgeModes)*(node+1);
+		point[1] = p[0][1]+(dy/edgeModes)*(node+1);
+		point[2] = p[0][2]+(dz/edgeModes)*(node+1);
+	}
+	
+}
+
 static void getEssentialBCs(BCs& bcs, Output& o)
 {
   Input& in = *o.in;
   apf::Mesh* m = o.mesh;
+  int p = o.in->globalP;
   apf::MeshTag* angles = 0;
   apf::MatchedSharing* ms = 0;
   if (m->hasMatching())
     ms = new apf::MatchedSharing(m);
   if (in.axisymmetry)
     angles = tagAngles(m, bcs, ms);
-  int nv = m->count(0);
+  int nv = o.nOverlapNodes;
   o.arrays.nbc = new int[nv];
   for (int i = 0; i < nv; ++i)
     o.arrays.nbc[i] = 0;
@@ -647,6 +978,7 @@ static void getEssentialBCs(BCs& bcs, Output& o)
   o.nEssentialBCNodes = 0;
   int ibc;
   int nec = countEssentialBCs(in);
+  std::cout<<" nv "<<nv<<"\n"; 
   double* bc = new double[nec]();
   gmi_model* gm = m->getModel();
   int i = 0;
@@ -660,7 +992,6 @@ static void getEssentialBCs(BCs& bcs, Output& o)
     ibc = 0;
     for (int j = 0; j < nec; ++j)
       bc[j] = 0;
-    //bool hasBC = applyEssentialBCs(gm, ge, bcs, x, bc, &ibc) && bcs.fields.count("material type");
     bool hasBC = applyEssentialBCs(gm, ge, bcs, x, bc, &ibc);
     /* matching introduces an iper bit */
     /* which is set for all slaves */
@@ -674,6 +1005,8 @@ static void getEssentialBCs(BCs& bcs, Output& o)
     if (hasBC) {
       o.arrays.nbc[i] = ei + 1;
       o.arrays.ibc[ei] = ibc;
+      //std::cout<<" i "<<i<<" vert nbc "<<o.arrays.nbc[i]<<"\n"; 	
+	  //std::cout<<" ei "<<ei<<" vert ibc "<<o.arrays.ibc[ei]<<"\n"; 	
       double* bc_ei = new double[nec];
       for (int j = 0; j < nec; ++j)
         bc_ei[j] = bc[j];
@@ -683,10 +1016,214 @@ static void getEssentialBCs(BCs& bcs, Output& o)
     ++i;
   }
   m->end(it);
+  
+  //iterate over edge
+   std::cout<<" start edge!!!!!!!! "<<"\n"; 
+  apf::MeshEntity* e;
+  apf::MeshIterator* ite = m->begin(1);
+  while ((e = m->iterate(ite))) {
+    int edgeMode = p-1;
+    //std::cout<<" edgeMode "<<edgeMode<<"\n"; 
+	if (edgeMode>0){
+    gmi_ent* ge = (gmi_ent*) m->toModel(e);
+	for (int k = 0; k < edgeMode; ++k)
+	{			
+		apf::Vector3 x;
+		getCoordinate(m,e,1,k,edgeMode,x);
+		//std::cout<<" edgeCOunt "<<i<<" edge coordinate "<<x[0]<<" "<<x[1]<<" "<<x[2]<<"\n"; 
+		ibc = 0;
+		for (int j = 0; j < nec; ++j)
+			bc[j] = 0;
+		bool hasBC = applyEssentialBCs(gm, ge, bcs, x, bc, &ibc);
+		    //std::cout<<" hasBCedge "<<hasBC<<"\n"; 
+		if (isMatchingSlave(ms, v)) {
+			hasBC = true;
+			ibc |= (1<<10);
+		if (in.axisymmetry && m->hasTag(v, angles))
+			m->getDoubleTag(v, angles, &bc[11]);
+		}
+		if (hasBC) {
+			
+				//std::cout<<" tagtemp "<<tageedgeTemp[k]<<"\n"; 				
+				o.arrays.nbc[i] = ei + 1;
+				o.arrays.ibc[ei] = ibc;
+				std::cout<<" i "<<i<<" edge nbc "<<o.arrays.nbc[i]<<"\n"; 	
+				std::cout<<" ei "<<ei<<" edge ibc "<<o.arrays.ibc[ei]<<"\n"; 		
+				double* bc_ei = new double[nec];
+				for (int j = 0; j < nec; ++j){
+					bc_ei[j] = bc[j];
+				}
+				bc_ei[6] = x[1]*200;
+				o.arrays.bc[ei] = bc_ei;
+				std::cout<<" ei "<<ei<<" bcPressure "<<o.arrays.bc[ei][2]<<" bcxVelocity"<<o.arrays.bc[ei][6]<<"\n"; 
+			++ei;
+			
+			}
+	++i;
+    }
+  }
+}
+  m->end(ite);
+  
+  for(int m = 0; m<i; m++)
+		//std::cout<<" m "<<m<<" nbc "<<o.arrays.nbc[m]<<"\n"; 
+    for (int l = 0; l<ei; l++){
+		//std::cout<<" l "<<l<<" edge ibc "<<o.arrays.ibc[l]<<"\n"; 	
+				for (int j = 2; j < 10; ++j){
+					//std::cout<<" l "<<l<<" j "<<j<<" bc "<<o.arrays.bc[l][6]<<"\n"; 
+				}
+			}
+  /*
+  apf::MeshEntity* f;
+  apf::MeshIterator* itf = m->begin(2);
+  while ((f = m->iterate(itf))) {
+	gmi_ent* ge = (gmi_ent*) m->toModel(f);
+	BlockKey k;
+    getInteriorBlockKey(m, e, k,p);
+    int faceMode = k.faceModeN;
+	if (faceMode>0){
+		std::cout<<" faceMode "<<faceMode<<"\n"; 
+	for (int k = 0; k < faceMode; ++k)
+	{			
+		apf::Vector3 x;
+		getCoordinate(m,f,2,k,faceMode,x);
+		ibc = 0;
+		for (int j = 0; j < nec; ++j)
+			bc[j] = 0;
+		bool hasBC = applyEssentialBCs(gm, ge, bcs, x, bc, &ibc);
+		if (isMatchingSlave(ms, v)) {
+			hasBC = true;
+			ibc |= (1<<10);
+		if (in.axisymmetry && m->hasTag(v, angles))
+			m->getDoubleTag(v, angles, &bc[11]);
+		}
+		if (hasBC) {			
+				o.arrays.nbc[i] = ei + 1;
+				o.arrays.ibc[i] = ibc;	
+				//std::cout<<" i "<<i<<" face ibc "<<o.arrays.ibc[i]<<"\n"; 		
+				double* bc_ei = new double[nec];
+				for (int j = 0; j < nec; ++j){
+					bc_ei[j] = bc[j];
+				}
+				o.arrays.bc[ei] = bc_ei;
+			++ei;
+			}
+	++i;
+    }
+	}
+	m->end(itf);
+  }
+  */
   delete [] bc;
   if (in.axisymmetry)
     m->destroyTag(angles);
   delete ms;
+}
+
+static void getGCEssentialBCs(Output& o, apf::Numbering* n)
+{
+  Input& in = *o.in;
+  apf::Mesh* m = o.mesh;
+  if(!in.ensa_melas_dof)
+    return;
+  PCU_Comm_Begin();
+
+  int nec = countEssentialBCs(in);
+  int& ei = o.nEssentialBCNodes;
+  int nv = m->count(0);
+
+  printf("rank: %d; already %d entries in iBC array. nv = %d\n", PCU_Comm_Self(), ei, nv);
+
+  apf::Copies remotes;
+  apf::MeshEntity* vent;
+  apf::MeshEntity* base;
+  int ibc = 0;
+  int bibc = 0;
+  int vID = 0;
+  int bID = 0;
+  int k = 0;
+  int ebcStr = 3+2+4+7; // 16; it depends on how BC array is arranged.
+  int ebcEnd = 3+2+4+7+8; // 24; 8 slots for mesh elas BCs
+  int eibcStr = 14; // it depends on how iBC bits are arranged.
+
+// loop over growth curves
+  int lc = 0; // list counter
+  for(int i = 0; i < o.nGrowthCurves; i++){
+    int igcnv = o.arrays.igcnv[i];
+    for(int j = 1; j < igcnv; j++){ // skip the base
+      vent = o.arrays.igclv[lc+j];
+      base = o.arrays.igclv[lc];
+	  vID = apf::getNumber(n, vent, 0, 0);
+	  bID = apf::getNumber(n, base, 0, 0);
+	  int bMID = o.arrays.nbc[bID]-1; // mapping ID
+	  PCU_ALWAYS_ASSERT(bMID >= 0); // should already in array
+	  bibc = o.arrays.ibc[bMID];
+	  double* bbc = o.arrays.bc[bMID];
+	  ibc |= (bibc & (1<<eibcStr | 1<<(eibcStr+1) | 1<<(eibcStr+2)));
+	  if(o.arrays.nbc[vID] <= 0){ // not in array
+        o.arrays.nbc[vID] = ei + 1;
+        o.arrays.ibc[ei] = ibc;
+        double* bc_new = new double[nec];
+		for(k = 0; k < ebcStr; k++)
+		  bc_new[k] = 0;
+        for(k = ebcStr; k < ebcEnd; k++)
+		  bc_new[k] = bbc[k];
+		o.arrays.bc[ei] = bc_new;
+        ++ei;
+	  }
+	  else{
+	    o.arrays.ibc[o.arrays.nbc[vID]-1] |= ibc;
+  		for(k = ebcStr; k < ebcEnd; k++)
+		  o.arrays.bc[o.arrays.nbc[vID]-1][k] = bbc[k];
+	  }
+	  // top most node
+	  if(j == igcnv - 1 && m->isShared(vent)){
+	    m->getRemotes(vent, remotes);
+		APF_ITERATE(apf::Copies, remotes, rit) {
+          PCU_COMM_PACK(rit->first, rit->second);
+		  PCU_Comm_Pack(rit->first, &ibc, sizeof(int));
+		  PCU_Comm_Pack(rit->first, &(bbc[0]), nec*sizeof(double));
+		}
+	  }
+    }
+	lc = lc + igcnv;
+  }
+
+// receive top most node
+  PCU_Comm_Send();
+  while (PCU_Comm_Receive()) {
+    apf::MeshEntity* rvent;
+    PCU_COMM_UNPACK(rvent);
+    int ribc = 0;
+	PCU_Comm_Unpack(&ribc, sizeof(int));
+	double* rbc = new double[nec];
+	PCU_Comm_Unpack(&(rbc[0]), nec*sizeof(double));
+	vID = apf::getNumber(n, rvent, 0, 0);
+    if(o.arrays.nbc[vID] <= 0){
+      o.arrays.nbc[vID] = ei + 1;
+      o.arrays.ibc[ei] = ribc;
+      double* rbc_new = new double[nec];
+      for(k = 0; k < ebcStr; k++)
+	    rbc_new[k] = 0;
+	  for(k = ebcStr; k < ebcEnd; k++)
+	    rbc_new[k] = rbc[k];
+      o.arrays.bc[ei] = rbc_new;
+	  ++ei;
+	}
+	else{
+	  o.arrays.ibc[o.arrays.nbc[vID]-1] |= ribc;
+      for(k = ebcStr; k < ebcEnd; k++)
+		o.arrays.bc[o.arrays.nbc[vID]-1][k] = rbc[k];
+	}
+  }
+
+  printf("rank: %d; end with %d entries in iBC array. nv = %d\n", PCU_Comm_Self(), o.nEssentialBCNodes, nv);
+
+// transfer entity to numbering
+  o.arrays.igclvid = new int[o.nLayeredMeshVertices];
+  for(int i = 0; i < o.nLayeredMeshVertices; i++){
+	o.arrays.igclvid[i] = apf::getNumber(n, o.arrays.igclv[i], 0, 0);
+  }
 }
 
 static void getInitialConditions(BCs& bcs, Output& o)
@@ -857,16 +1394,16 @@ void generateOutput(Input& in, BCs& bcs, apf::Mesh* mesh, Output& o)
   double t0 = PCU_Time();
   o.in = &in;
   o.mesh = mesh;
-  int p = in.GlobalP;
-  std::cout<<" p Order "<<p<<"\n"; 
+  int p = in.globalP;
+  printf("globalP %d \n",p);
   getCounts(o);
   getCoordinates(o);
   getGlobal(o);
-  getAllBlocks(o.mesh, bcs, o.blocks,p);
+  getAllBlocks(o.mesh, bcs, o.blocks, p);
   apf::Numbering* n = apf::numberOverlapNodes(mesh, "ph_local");
   apf::Numbering* rn = apf::numberElements(o.mesh, "ph_elem");
   
-  int Vcount =0;
+   int Vcount = o.mesh->count(0);
   int edgeDOFcount = 0;
   int faceDOFcount = 0;
   int regionDOFcount = 0;
@@ -875,24 +1412,26 @@ void generateOutput(Input& in, BCs& bcs, apf::Mesh* mesh, Output& o)
   int regionMode = (1/3)*(p-1)*(p-2)*(p-3);
   TagAllDOF(o, edgeMode, faceMode, regionMode, Vcount, edgeDOFcount,  faceDOFcount,  regionDOFcount);
   std::cout<<" DOFcount "<<Vcount<<" "<<edgeDOFcount<<" "<<faceDOFcount<<" "<<regionDOFcount<<"\n"; 
+  int totalDOFcount = regionDOFcount;
+  o.nOverlapNodes = totalDOFcount;
+  
   
   getVertexLinks(o, n, bcs);
-  getInteriorIEN(o, n, edgeMode, faceMode, regionMode);
   getInterior(o, bcs, n);
-
-  
   getBoundary(o, bcs, n);
   getInterface(o, bcs, n);
   checkInterface(o,bcs);
   getLocalPeriodicMasters(o, n, bcs);
   getEdges(o, n, rn, bcs);
-  apf::destroyNumbering(n);
+  getGrowthCurves(o);
   getBoundaryElements(o);
   getInterfaceElements(o);
   getMaxElementNodes(o);
   getEssentialBCs(bcs, o);
+  getGCEssentialBCs(o, n);
   getInitialConditions(bcs, o);
   getElementGraph(o, rn, bcs);
+  apf::destroyNumbering(n);
   apf::destroyNumbering(rn);
   if (in.initBubbles)
     initBubbles(o.mesh, in);
